@@ -1,0 +1,101 @@
+Rank City Country Population 
+1; Seoul; South Korea; 10,231,000
+2; Sao Paulo; Brazil; 10,009,000
+3; Bombay; India; 9,925,000
+4; Jakarta; Indonesia; 9,373,000
+5; Karachi; Pakistan; 9,339,000
+6; Moscow; Russia; 8,297,000
+7; Istanbul; Turkey; 8,260,000
+8; Mexico City; Mexico; 8,235,000
+9; Shanghai; China; 8,214,000
+10; Tokyo; Japan; 8,130,000
+11; New York; USA; 8,008,000
+12; Bangkok; Thailand; 7,506,700
+13; Beijing; China; 7,362,000
+14; Delhi; India; 7,206,000
+15; London; UK; 7,074,000
+16; Hong Kong; China; 6,843,000
+17; Cairo; Egypt; 6,800,000
+18; Tehran; Iran; 6,758,000
+19; Bogota; Colombia; 6,422,000
+20; Bandung; Indonesia; 5,919,000
+21; Tianjin; China; 5,855,000
+22; Lima; Peru; 5,681,000
+23; Rio de Janeiro; Brazil; 5,613,000
+24; Lahore; Pakistan; 5,143,000
+25; Bogor; Indonesia; 5,000,000
+26; Santiago; Chile; 4,788,000
+27; St Petersburg; Russia; 4,678,000
+28; Shenyang; China; 4,669,000
+29; Calcutta; India; 4,399,000
+30; Wuhan; China; 4,040,000
+31; Sydney; Australia; 4,031,000
+32; Guangzhou; China; 3,935,000
+33; Singapore; Singapore; 3,894,000
+34; Madras; India; 3,841,000
+35; Baghdad; Iraq; 3,841,000
+36; Pusan; South Korea; 3,814,000
+37; Los Angeles; USA; 3,694,000
+38; Yokohama; Japan; 3,426,000
+39; Dhaka; Bangladesh; 3,397,000
+40; Berlin; Germany; 3,386,000
+41; Alexandria; Egypt; 3,339,000
+42; Bangalore; India; 3,302,000
+43; Malang; Indonesia; 3,173,000
+44; Hyderabad; India; 3,145,000
+45; Chongqing; China; 3,127,000
+46; Ho Chi Minh City; Vietnam; 3,015,000
+47; Haerbin; China; 2,990,000
+48; Ankara; Turkey; 2,984,000
+49; Buenos Aires; Argentina; 2,965,000
+50; Chengdu; China; 2,954,000
+51; Ahmedabad; India; 2,954,000
+52; Casablanca; Morocco; 2,943,000
+53; Chicago; USA; 2,896,000
+54; Xian; China; 2,872,000
+55; Madrid; Spain; 2,823,000
+56; Surabaya; Indonesia; 2,801,000
+57; Pyong Yang; North Korea; 2,741,000
+58; Nanjing; China; 2,678,000
+59; Kinshaha; Congo; 2,664,000
+60; Rome; Italy; 2,648,000
+61; Taipei; China; 2,640,000
+62; Osaka; Japan; 2,598,000
+63; Kiev; Ukraine; 2,589,000
+64; Yangon; Myanmar; 2,513,000
+65; Toronto; Canada; 2,500,000
+66; Zibo; China; 2,484,000
+67; Dalian; China; 2,483,000
+68; Taega; South Korea; 2,449,000
+69; Addis Ababa; Ethopia; 2,424,000
+70; Jinan; China; 2,403,000
+71; Salvador; Brazil; 2,331,000
+72; Inchon; South Korea; 2,308,000
+73; Semarang; Indonesia; 2,221,000
+74; Giza; Egypt; 2,221,000
+75; Changchun; China; 2,192,000
+76; Havanna; Cuba; 2,192,000
+77; Nagoya; Japan; 2,171,000
+78; Belo Horizonte; Brazil; 2,154,000
+79; Paris; France; 2,152,000
+80; Tashkent; Uzbekistan; 2,142,000
+81; Fortaleza; Brazil; 2,139,000
+82; Sukabumi; Indonesia; 2,137,000
+83; Cali; Colombia; 2,128,000
+84; Guayaquil; Ecuador; 2,117,000
+85; Qingdao; China; 2,101,000
+86; Izmir; Turkey; 2,081,000
+87; Cirebon; Indonesia; 2,080,000
+88; Taiyuan; China; 2,051,000
+89; Brasilia; Brazil; 2,016,000
+90; Bucuresti; Romania; 2,016,000
+91; Faisalabad; Pakistan; 2,008,000
+92; Quezon City; Philippines; 1,989,000
+93; Medan; Indonesia; 1,988,000
+94; Houston; USA; 1,953,000
+95; Abidjan; Cote d’Ivorie; 1,929,000
+96; Mashhad; Iran; 1,887,000
+97; Medellin; Colombia; 1,885,000
+98; Kanpur; India; 1,879,000
+99; Budapest; Hungary; 1,825,000
+100; Caracas; Venezuela; 1,823,00
