@@ -1,6 +1,6 @@
 # LMRL Gym: Benchmarks for Multi-Turn Reinforcement Learning with Language Models
 
-This is the official repository for LMRL Gym. You can download the dataset [here](https://rail.eecs.berkeley.edu/datasets/rl-llm-bench-dataset/). 
+This is the official repository for LMRL Gym. You can access the dataset [here](https://rail.eecs.berkeley.edu/datasets/rl-llm-bench-dataset/). 
 
 <!-- ## Baseline Descriptions 
 
