@@ -40,7 +40,7 @@ This task simulates a conversation between a car buyer and a car dealer, each wi
 Files to run each of the tasks can be found in llm_rl_scripts. For each task you will need to train BC before finetuning with RL. For example, to run BC for the Maze task, you would launch the following command: 
 
 ``` shell
-python llm_rl_scripts/maze/bc/fully_observed_bc.py HF gpt2 gcs://rl-llm-bench-dataset-internal/maze/fully_observed_maze_data.jsonl --outputs-path bc_checkpoint_path
+python llm_rl_scripts/maze/bc/fully_observed_bc.py HF gpt2 PATH_TO_YOUR_DATA --outputs-path bc_checkpoint_path
 ```
 
 Then convert the BC checkpoint to PARAMS format using 
@@ -58,7 +58,7 @@ python llm_rl_scripts/maze/bc/eval_bc.py PARAMS bc_checkpoint_path
 Then to finetune with ILQL using this checkpoint you run 
 
 ``` shell
-python llm_rl_scripts/maze/ilql/train_ilql.py PARAMS bc_checkpoint_path gcs://rl-llm-bench-dataset-internal/maze/fully_observed_maze_data.jsonl --outputs-path ilql_checkpoint_path
+python llm_rl_scripts/maze/ilql/train_ilql.py PARAMS bc_checkpoint_path PATH_TO_YOUR_DATA --outputs-path ilql_checkpoint_path
 ```
 
 Finally, to evaluate the results you run 
