@@ -60,7 +60,7 @@ def get_default_word_list() -> List[WordVariants]:
             city = city.capitalize()[1:]
             word_list.append(city + "," + country)
 
-    retun word_list
+    return word_list
 
 def create_trajectory_from_history(
     word_var: WordVariants, 
