@@ -21,7 +21,7 @@ from llm_rl_scripts.text_nav.env import TextNavEnv
 from LLM_RL.algorithms.ppo.gpt2.interface import GPT2PPOPolicy
 from LLM_RL.environment import text_history_to_str, text_env_eval
 
-from llm_rl_scripts.guess_city.env import GuessCityPolicyEnvironment
+from llm_rl_scripts.guess_city.env.env import GuessCityPolicyEnvironment
 from llm_rl_scripts.guess_city.env.oracle import T5Oracle
 from llm_rl_scripts.guess_city.env.oracle import T5ModelLoadMode as T5OracleModelLoadMode
 from llm_rl_scripts.guess_city.env.data import get_default_word_list, create_conversation_from_history 

@@ -209,27 +209,6 @@ def main(
         model=model, 
         tokenizer=tokenizer, 
     )
-    
-    # trainer = load_bc_trainer(
-    #     model=model, 
-    #     params=params, 
-    #     param_spec=param_spec, 
-    #     tokenizer=tokenizer, 
-    #     optim=optim, 
-    #     optim_state=optim_state, 
-    #     optim_state_spec=optim_state_spec, 
-    #     do_pjit=do_pjit, 
-    #     loss_fn=loss_fn, 
-    # )
-
-    # inference = load_bc_inference(
-    #     model=model, 
-    #     params=params, 
-    #     param_spec=param_spec, 
-    #     tokenizer=tokenizer, 
-    #     do_pjit=do_pjit, 
-    #     loss_fn=loss_fn, 
-    # )
 
     save_dir, exp_name = setup_experiment_save(
         exp_name=exp_name, 
