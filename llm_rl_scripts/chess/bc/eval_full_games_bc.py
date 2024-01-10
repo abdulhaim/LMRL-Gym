@@ -116,7 +116,7 @@ def main(
             ), 
             out_str_process=lambda x: x.removesuffix('\n')+'\n', 
         )
-        
+        position = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
         interactions, results = text_env_eval(
             env=env,
             policy=policy,
