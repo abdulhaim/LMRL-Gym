@@ -1,5 +1,6 @@
 from pickle import UnpicklingError
 from charset_normalizer import from_bytes
+import torch
 from transformers.modeling_flax_pytorch_utils import load_flax_checkpoint_in_pytorch_model, load_flax_weights_in_pytorch_model
 from transformers import T5ForConditionalGeneration, FlaxT5ForConditionalGeneration, AutoTokenizer
 from JaxSeq.bucket_manager import open_with_bucket as open
@@ -19,14 +20,6 @@ from transformers.generation import GenerationConfig
 def load_t5_pytorch_model(params):
     pt_model = T5ForConditionalGeneration.from_pretrained("google/flan-t5-xl", architectures=["T5ForConditionalGeneration"])
 
-    # params, model = t5_load_params(
-    #         model_load_mode=T5ModelLoadMode.PARAMS,
-    #         model_load_path=flax_checkpoint_path,
-    #         tokenizer="google/flan-t5-xl",
-    #         mesh=load_mesh((1, 1, -1), ('dp', 'fsdp', 'mp')),
-    #         model_dtype=get_dtype(use_fp16=True),
-    #         params_dtype=get_dtype(use_fp16=True)
-    #     )
     start_indices = (0, 0)
     params["lm_head"]["kernel"] = jax.lax.dynamic_slice(params["lm_head"]["kernel"], start_indices, pt_model.state_dict()["lm_head.weight"].T.shape)
     params["shared"]["embedding"] = jax.lax.dynamic_slice(params["shared"]["embedding"], start_indices, pt_model.state_dict()["shared.weight"].shape)
@@ -39,8 +32,15 @@ def load_t5_pytorch_model(params):
 
     new_model = load_flax_weights_in_pytorch_model(pt_model, params)
 
-    new_model.state_dict()["encoder.embed_tokens.weight"] = new_model.state_dict()["shared.weight"]
-    new_model.state_dict()["decoder.embed_tokens.weight"] = new_model.state_dict()["shared.weight"]
+    # if changing to shared embedding 
+    # new_model.state_dict()["encoder.embed_tokens.weight"] = new_model.state_dict()["shared.weight"]
+    # new_model.state_dict()["decoder.embed_tokens.weight"] = new_model.state_dict()["shared.weight"]
+    # if changing to language model head
+    # new_model.state_dict()["encoder.embed_tokens.weight"] = new_model.state_dict()["lm_head.weight"].T
+    # new_model.state_dict()["decoder.embed_tokens.weight"] = new_model.state_dict()["lm_head.weight"].T
+
+    new_model.state_dict()["encoder.embed_tokens.weight"] = torch.zeros_like(new_model.state_dict()["encoder.embed_tokens.weight"])
+    new_model.state_dict()["decoder.embed_tokens.weight"] = torch.zeros_like(new_model.state_dict()["decoder.embed_tokens.weight"])
     return new_model
 
 model_load_path = "gcs://rl-llm-bench-dataset-internal/guess-my-city/simulator/model/"
@@ -64,8 +64,10 @@ def flax_model_generation(sentence_fragment, model: FlaxT5ForConditionalGenerati
             do_sample=False,
             num_beams=1,
             max_new_tokens=100,
+            decoder_start_token_id=tokenizer.encode('\n')[0],
     )
     generation = inference.generate_from_str([sentence_fragment], 
+                                             prng_key=None,
                                              generation_config=generation_config,)
     return generation.output_strs
 
@@ -74,7 +76,7 @@ def flax_model_generation(sentence_fragment, model: FlaxT5ForConditionalGenerati
     # outputs = model.generate(input_ids, max_length=100, num_beams=1, do_sample=False).sequences
     # return tokenizer.decode(outputs[0])
 
-sentence_fragment = "I am from "
+sentence_fragment = "The best food from my city is "
 
 flax_params, flax_model = t5_load_params(
             model_load_mode=T5ModelLoadMode.PARAMS,
@@ -87,10 +89,15 @@ flax_params, flax_model = t5_load_params(
 
 pt_model = load_t5_pytorch_model(flax_params)
 
-embed()
-
 pytorch_completion = pytorch_model_generation(sentence_fragment, pt_model)
-flax_completion = flax_model_generation(sentence_fragment, flax_model)
+print("The best food from my city is ", pytorch_completion)
+print("I am from ", pytorch_model_generation("I am from ", pt_model))
+print("My favorite thing about my city is ", pytorch_model_generation("My favorite thing about my city is ", pt_model))
+
+embed()
+start_indices = (0, 0)
+flax_params["shared"]["embedding"] = jax.lax.dynamic_slice(flax_params["shared"]["embedding"], start_indices, pt_model.state_dict()["shared.weight"].shape)
+flax_completion = flax_model_generation(sentence_fragment, flax_model, flax_params)
 
 
 # save_path = os.getcwd() + "/outputs/guess_city_pytorch_model.pt"

@@ -19,6 +19,7 @@ import json
 import numpy as np
 from transformers import AutoTokenizer
 from JaxSeq.bucket_manager import open_with_bucket as open
+from LLM_RL.algorithms.ppo.gpt2.interface import GPT2PPOPolicy
 from LLM_RL.algorithms.ppo.reranker_policy import ReRankerSamplePolicy
 from LLM_RL.algorithms.ppo.score_fn import build_bc_score_fn
 import random
@@ -26,6 +27,7 @@ from LLM_RL.environment import text_env_eval
 from llm_rl_scripts.maze.env.env import maze_proposal_function
 from llm_rl_scripts.maze.env.maze_utils import pick_start_position, setup_maze_env
 from llm_rl_scripts.maze.env.mazes import double_t_maze
+from transformers.generation import GenerationConfig
 
 def main(
     model_load_mode: ModelLoadMode, 
@@ -65,6 +67,12 @@ def main(
 
     max_input_length: int=256, 
     max_output_length: int=16, 
+
+    policy_do_sample: bool=True, 
+    policy_num_beams: int=1, 
+    policy_temperature: Optional[float]=None, 
+    policy_top_p: Optional[float]=None, 
+    policy_top_k: Optional[int]=None,
 
     log_every: int=256, 
     eval_every_steps: Optional[int]=256, 
@@ -247,14 +255,25 @@ def main(
             position = tuple(position)
             _, results[str(position)] = text_env_eval(
                 env=env, 
-                policy=ReRankerSamplePolicy(
-                    proposal_fn=maze_proposal_function, 
-                    score_fn=build_bc_score_fn(
-                        inference=inference, 
-                        tokenizer=tokenizer, 
-                        max_length=8, 
-                        bsize=4, 
-                    )
+                policy = GPT2PPOPolicy(
+                    inference=inference, 
+                    prng_key=jax.random.PRNGKey(0), 
+                    generation_config=GenerationConfig(
+                        do_sample=policy_do_sample, 
+                        num_beams=policy_num_beams, 
+                        temperature=policy_temperature, 
+                        top_p=policy_top_p, 
+                        top_k=policy_top_k, 
+                        eos_token_id=tokenizer.encode('\n')[0], 
+                        pad_token_id=tokenizer.pad_token_id, 
+                        max_new_tokens=max_output_length, 
+                    ), 
+                    blocking_strategy=BlockingStrategy(
+                        padding=Padding.LEFT, 
+                        truncation=Truncation.LEFT, 
+                        max_length=max_input_length, 
+                    ), 
+                    out_str_process=lambda x: x.removesuffix('\n')+'\n', 
                 ), 
                 n_rollouts=1, 
                 verbose=True, 
