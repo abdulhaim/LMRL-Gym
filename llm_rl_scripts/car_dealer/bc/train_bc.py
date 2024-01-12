@@ -3,29 +3,38 @@ from typing import Any, Dict, List, Optional
 import jax
 from JaxSeq.models.gpt2.interface import GPT2TrainMask, GPT2InferenceMask
 from JaxSeq.optimizers import GPT3Optimizer
-from jax_models.gpt2 import load_gpt2_model
+from LLM_RL.algorithms.ppo.gpt2.interface import GPT2PPOPolicy
+from JaxSeq.utils import convert_path, load_mesh, setup_experiment_save, MapIterable, BlockingStrategy, Padding, Truncation
+from JaxSeq.utils import get_weight_decay_mask
+# from jax_models.gpt2 import load_gpt2_model
+from JaxSeq.models.gpt2.load import load_train_state, ModelLoadMode
 import numpy as np
 from jax.experimental.maps import Mesh
 import optax
-import dcargs
+import tyro
 from functools import partial
-from text_env_eval import text_env_eval
+from LLM_RL.environment import text_env_eval
 from token_history import text_history_to_token_history, text_transition_to_token_transition
-from utils.path import convert_path
+from JaxSeq.utils import convert_path,
 import os
 import pickle as pkl
 import json
-from LLM_RL.algorithms.jax_bc.core import bc_loss, load_bc_inference, load_bc_trainer
+from LLM_RL.algorithms.bc.core import bc_loss, load_bc_inference, load_bc_trainer
 import pickle as pkl
-from LLM_RL.algorithms.jax_bc.data import BCDataset, filter_generator, filter_items
-from LLM_RL.algorithms.jax_bc.basic_train_loop import train_loop, eval_loop
-from LLM_RL.environments.car_dealer.data import create_trajectories_from_conversations, Role
+from LLM_RL.algorithms.bc.data import BCDataset, filter_generator, filter_items
+from LLM_RL.algorithms.bc.basic_train_loop import train_loop, eval_loop
+from llm_rl_scripts.car_dealer.env.data import create_trajectories_from_conversations, Role
 import tree
 from transformers import AutoTokenizer
+from JaxSeq.bucket_manager import open_with_bucket as open
+from transformers import GenerationConfig
+import jax.numpy as jnp
+from jaxtyping import PyTree
 
 def main(
     exp_name: Optional[str], 
     model_name: str, 
+    model_load_mode: ModelLoadMode=ModelLoadMode.HF,
 
     /,  # Mark the end of positional arguments.
 
@@ -51,10 +60,16 @@ def main(
     eval_batches: Optional[int]=None, 
     
     use_adafactor: bool=False,
-    lr: float=1e-5,
-    use_lr_schedule: bool=False,
-    peak_lr: float=5e-5, 
-    end_lr: float=6e-5, 
+
+    init_lr: float=0.0,
+    end_lr: float=0.0001,
+    lr: float=0.0001,
+    lr_warmup_steps: int=1,
+    lr_decay_steps: int=2, # no decay, so just needs to be > warmup steps
+    bf16_momentum: bool=False, 
+    multiply_by_parameter_scale: bool=True,
+
+
     weight_decay: float=0.0, 
 
     train_bsize: int=32, 
@@ -63,6 +78,15 @@ def main(
     gradient_checkpoint: bool=True, 
 
     max_sequence_length: int=1024, 
+
+    policy_do_sample: bool=False,
+    policy_num_beams: int=1,
+    policy_temperature: float=1.0,
+    policy_top_p: float=1.0,
+    policy_top_k: int=0,
+    policy_max_output_length: int=1024,
+
+    bf16_activations: bool=False,
 
     log_every: Optional[int]=None, 
     num_logs_per_epoch: int=10,
@@ -87,8 +111,7 @@ def main(
 
     input_args = locals().copy()
     print(input_args)
-
-    from utils.gcs_manager import open_pp as open
+    
     open = partial(open, gcloud_project=gcloud_project, gcloud_token=gcloud_token)
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -186,7 +209,7 @@ def main(
     model_prng_key = jax.random.PRNGKey(2)
     train_state, model = load_train_state(
         model_load_mode=model_load_mode, 
-        model_load_path=convert_path(model_load_path) if model_load_mode != ModelLoadMode.HF else model_load_path, 
+        model_load_path=convert_path(model_name) if model_load_mode != ModelLoadMode.HF else model_name, 
         model_dtype=jnp.bfloat16 if bf16_activations else jnp.float32, 
         optim_getter=optim_getter, 
         tokenizer=tokenizer, 
@@ -311,4 +334,4 @@ def main(
     )
 
 if __name__ == "__main__":
-    dcargs.cli(main)
+    tyro.cli(main)
