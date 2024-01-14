@@ -14,6 +14,7 @@ import optax
 import tyro
 from functools import partial
 from LLM_RL.environment import text_env_eval
+from llm_rl_scripts.car_dealer.env.policies import text_history_to_str
 from token_history import text_history_to_token_history, text_transition_to_token_transition
 from JaxSeq.utils import convert_path,
 import os
@@ -39,6 +40,7 @@ def main(
     /,  # Mark the end of positional arguments.
 
     role: Role=Role.SELLER, 
+    outputs_path: str="outputs/", 
 
     top_p: Optional[float]=None, 
 
@@ -52,8 +54,11 @@ def main(
     wandb_project: Optional[str]='car-dealer-bc', 
 
     do_pjit: bool=True, 
-    model_p_shape: int=1, 
-    data_p_shape: int=1, 
+
+    data_mesh_shape: int=1, 
+    fsdp_mesh_shape: int=1, 
+    model_mesh_shape: int=-1, 
+
 
     epochs: int=2, 
     max_steps: Optional[int]=None, 
@@ -73,7 +78,9 @@ def main(
     weight_decay: float=0.0, 
 
     train_bsize: int=32, 
-    grad_accum_steps: int=1, 
+    grad_accum_steps: int=4, 
+
+    policy_bsize: int=1, 
 
     gradient_checkpoint: bool=True, 
 
@@ -85,8 +92,27 @@ def main(
     policy_top_p: float=1.0,
     policy_top_k: int=0,
     policy_max_output_length: int=1024,
+    policy_max_input_length: int=1024,
 
     bf16_activations: bool=False,
+
+    policy_n_rollouts: int=1, 
+
+    eval_every_steps: Optional[int]=256, 
+    eval_every_epochs: Optional[int]=None, 
+    eval_at_beginning: bool=False, 
+    eval_at_end: bool=True, 
+    
+    save_every_steps: Optional[int]=None, 
+    save_every_epochs: Optional[int]=None, 
+    save_at_beginning: bool=False, 
+    save_at_end: bool=False, 
+    save_best: bool=True, 
+    max_checkpoints: Optional[int]=None, 
+    save_train_state: bool=True, 
+    save_bf16: bool=True, 
+
+    force_pad_embeddings: bool=False, 
 
     log_every: Optional[int]=None, 
     num_logs_per_epoch: int=10,
@@ -94,12 +120,12 @@ def main(
     num_evals_per_epoch: int=5, 
     save_every: Optional[int]=None, 
     num_saves_per_epoch: int=1,
-    save_best: bool=False,
     save_best_also: bool=False,
     save_last: bool=False,
 
     inference_bsize: int=32, 
     seed: int=0,
+    should_restore_loop_state: bool=False,
 
     gcloud_project: Optional[str]=None, 
     gcloud_token: Optional[str]=None, 
@@ -111,6 +137,9 @@ def main(
 
     input_args = locals().copy()
     print(input_args)
+
+    is_main_process = jax.process_index() == 0
+    mesh = load_mesh((data_mesh_shape, fsdp_mesh_shape, model_mesh_shape), ('dp', 'fsdp', 'mp'))
     
     open = partial(open, gcloud_project=gcloud_project, gcloud_token=gcloud_token)
 
@@ -166,16 +195,16 @@ def main(
     
     if model_name == 'gpt2-xl' or model_name == 'gpt2-medium':
         print("loading model")
-        model, params, shard_rules = load_gpt2_model(
-            model_str=model_name, 
-            from_pretrained=True, 
-            checkpoint_path=checkpoint_path, 
-            use_fp16=jax.default_backend() == 'tpu', 
+        train_state, model = load_train_state(
+            model_load_mode=model_load_mode, 
+            model_load_path=convert_path(model_load_path) if model_load_mode != ModelLoadMode.HF else model_load_path, 
+            model_dtype=jnp.bfloat16 if bf16_activations else jnp.float32, 
+            optim_getter=optim_getter, 
             tokenizer=tokenizer, 
-            gradient_checkpoint=gradient_checkpoint, 
-            seed=0, 
-            gcloud_project=gcloud_project, 
-            gcloud_token=gcloud_token, 
+            mesh=mesh, 
+            prng_key=model_prng_key, 
+            force_pad_embeddings=force_pad_embeddings, 
+            params_dtype=jnp.float32, 
         )
     else:
         raise NotImplementedError
@@ -218,11 +247,11 @@ def main(
         force_pad_embeddings=force_pad_embeddings, 
         params_dtype=jnp.float32, 
     )
-    model.config.gradient_checkpointing = gradient_checkpointing
-    model.config.gradient_checkpointing_policy = gradient_checkpointing_policy
-    model.config.resid_pdrop = resid_pdrop
-    model.config.embd_pdrop = embd_pdrop
-    model.config.attn_pdrop = attn_pdrop
+    # model.config.gradient_checkpointing = gradient_checkpointing
+    # model.config.gradient_checkpointing_policy = gradient_checkpointing_policy
+    # model.config.resid_pdrop = resid_pdrop
+    # model.config.embd_pdrop = embd_pdrop
+    # model.config.attn_pdrop = attn_pdrop
 
     loop_state = dict()
     if should_restore_loop_state and (model_load_mode in {ModelLoadMode.TRAIN_STATE, 
