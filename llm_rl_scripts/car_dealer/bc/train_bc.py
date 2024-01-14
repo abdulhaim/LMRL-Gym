@@ -7,7 +7,7 @@ from LLM_RL.algorithms.ppo.gpt2.interface import GPT2PPOPolicy
 from JaxSeq.utils import convert_path, load_mesh, setup_experiment_save, MapIterable, BlockingStrategy, Padding, Truncation
 from JaxSeq.utils import get_weight_decay_mask
 # from jax_models.gpt2 import load_gpt2_model
-from JaxSeq.models.gpt2.load import load_train_state, ModelLoadMode
+from JaxSeq.models.gpt2.load import load_train_state, ModelLoadMode, load_params
 import numpy as np
 from jax.experimental.maps import Mesh
 import optax
@@ -15,7 +15,7 @@ import tyro
 from functools import partial
 from LLM_RL.environment import text_env_eval
 from llm_rl_scripts.car_dealer.env.policies import text_history_to_str
-from token_history import text_history_to_token_history, text_transition_to_token_transition
+from LLM_RL.environment import TokenHistory
 from JaxSeq.utils import convert_path,
 import os
 import pickle as pkl
@@ -25,20 +25,24 @@ import pickle as pkl
 from LLM_RL.algorithms.bc.data import BCDataset, filter_generator, filter_items
 from LLM_RL.algorithms.bc.basic_train_loop import train_loop, eval_loop
 from llm_rl_scripts.car_dealer.env.data import create_trajectories_from_conversations, Role
+from llm_rl_scripts.car_dealer.env.env import BatchedCarDealerPolicyEnvironment
+from llm_rl_scripts.car_dealer.env.buyer import BatchedGPT2BuyerPolicy
 import tree
 from transformers import AutoTokenizer
 from JaxSeq.bucket_manager import open_with_bucket as open
 from transformers import GenerationConfig
 import jax.numpy as jnp
 from jaxtyping import PyTree
+import re
 
 def main(
-    exp_name: Optional[str], 
+    model_load_mode: ModelLoadMode, 
     model_name: str, 
-    model_load_mode: ModelLoadMode=ModelLoadMode.HF,
+    buyer_model_path: str,
 
     /,  # Mark the end of positional arguments.
 
+    exp_name: Optional[str], 
     role: Role=Role.SELLER, 
     outputs_path: str="outputs/", 
 
@@ -169,8 +173,8 @@ def main(
     train_text_histories = [trajectory.text_history for trajectory in train_text_trajectories]
     eval_text_histories = [trajectory.text_history  for trajectory in eval_text_trajectories]
 
-    train_token_histories = [text_history_to_token_history(text_history, tokenizer) for text_history in train_text_histories]
-    eval_token_histories = [text_history_to_token_history(text_history, tokenizer) for text_history in eval_text_histories]
+    train_token_histories = [TokenHistory.from_text_history(text_history, tokenizer) for text_history in train_text_histories]
+    eval_token_histories = [TokenHistory.from_text_history(text_history, tokenizer) for text_history in eval_text_histories]
     
     train_token_histories = [token_history for token_history in train_token_histories if token_history.tokens.shape[0] <= max_sequence_length]
     eval_token_histories = [token_history for token_history in eval_token_histories if token_history.tokens.shape[0] <= max_sequence_length]
@@ -197,7 +201,7 @@ def main(
         print("loading model")
         train_state, model = load_train_state(
             model_load_mode=model_load_mode, 
-            model_load_path=convert_path(model_load_path) if model_load_mode != ModelLoadMode.HF else model_load_path, 
+            model_load_path=convert_path(model_name) if model_load_mode != ModelLoadMode.HF else model_name, 
             model_dtype=jnp.bfloat16 if bf16_activations else jnp.float32, 
             optim_getter=optim_getter, 
             tokenizer=tokenizer, 
@@ -282,6 +286,25 @@ def main(
     )
     
     policy_prng = jax.random.PRNGKey(0)
+    print("load environment")
+    prng_key = jax.random.PRNGKey(3)
+    prng_key, buyer_inference_prng, buyer_policy_prng = jax.random.split(prng_key, 3)
+    buyer_model_mode = ModelLoadMode.PARAMS
+    buyer_params, buyer_model = load_params(
+        model_load_mode=buyer_model_mode, 
+        model_load_path=convert_path(buyer_model_path) if model_load_mode != ModelLoadMode.HF else buyer_model_path, 
+        model_dtype=jnp.bfloat16 if bf16_activations else jnp.float32, 
+        tokenizer=tokenizer, 
+        mesh=mesh, 
+        prng_key=buyer_inference_prng, 
+        force_pad_embeddings=force_pad_embeddings, 
+        params_dtype=jnp.float32, 
+    )
+
+    env = BatchedCarDealerPolicyEnvironment(
+        buyer=buyer_model, 
+        bsize=8,
+    )
 
     def evaluator(inference: GPT2InferenceMask):
         nonlocal policy_prng
