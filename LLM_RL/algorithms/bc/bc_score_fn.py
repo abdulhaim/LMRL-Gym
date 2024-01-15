@@ -1,11 +1,10 @@
 from typing import List, Optional
-from algorithms.jax_bc.core import BCInference
+from LLM_RL.algorithms.bc.bc_score_fn import BCInference
 from environment import TextHistory
 from transformers.tokenization_utils import PreTrainedTokenizer
 import jax.numpy as jnp
 import numpy as np
-from jax_utils.data import block_sequences
-from token_history import text_history_to_token_history
+from LLM_RL.environment import TokenHistory
 import jax
 
 def build_bc_score_fn(
@@ -21,8 +20,8 @@ def build_bc_score_fn(
         prev_token_histories = []
         token_histories = []
         for text_history in text_histories:
-            prev_token_histories.append(text_history_to_token_history(text_history[:-1], tokenizer))
-            token_histories.append(text_history_to_token_history(text_history, tokenizer))
+            prev_token_histories.append(TokenHistory.from_text_history(text_history[:-1], tokenizer))
+            token_histories.append(TokenHistory.from_text_history(text_history, tokenizer))
         
         # truncate to end and pad tokens
         tokens = np.stack([np.concatenate((token_history.tokens[-max_length:], np.full((max_length-min(token_history.tokens.shape[0], max_length),), tokenizer.pad_token_id)), axis=0) for token_history in token_histories], axis=0)

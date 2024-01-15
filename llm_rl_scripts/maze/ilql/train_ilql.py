@@ -114,7 +114,6 @@ def main(
         with open(data_name, "r") as f:
             for item in f:
                 obj = json.loads(item)
-                # curr_chain = TextTrajectory()
                 # starting with the last element
                 last_trajectory = TextTrajectory([Text(obj[-1]["state"], False), Text(obj[-1]["action"], True)], 
                                                  [0, obj[-1]["reward"]], True)
@@ -129,19 +128,7 @@ def main(
                 while token_trajectory_chain.next is not None:
                     yield ILQLData.from_token_trajectory_chain(token_trajectory_chain)
                     token_trajectory_chain = token_trajectory_chain.next
-                # first_trajectory = TextTrajectory([Text(obj[0]["state"], False), Text(obj[0]["action"], True)],
-                #                                 [0, obj[0]["reward"]], obj[0]["done"])
-                # next_trajectory = TextTrajectory([Text(obj[1]["state"], False), Text(obj[1]["action"], True)],
-                #                                         [0, obj[1]["reward"]], obj[1]["done"])
-                
-                # text_trajectory_chain = TextTrajectoryChain(text_trajectory=first_trajectory, 
-                #                                             next=TextTrajectoryChain(text_trajectory=next_trajectory, next=next_trajectory))
-                # token_trajectory_chain = TokenTrajectoryChain.from_text_trajectory_chain(text_trajectory_chain, tokenizer)
-                # yield ILQLData.from_token_trajectory_chain(token_trajectory_chain)
-                # if next_trajectory.done:
-                #     text_trajectory_chain = TextTrajectoryChain(text_trajectory=next_trajectory, next=next_trajectory)
-                #     token_trajectory_chain = TokenTrajectoryChain.from_text_trajectory_chain(text_trajectory_chain, tokenizer)
-                #     yield ILQLData.from_token_trajectory_chain(token_trajectory_chain)
+
     ilql_data_lst = list(ilql_data_generator(train_data_path))
     random.shuffle(ilql_data_lst)
     

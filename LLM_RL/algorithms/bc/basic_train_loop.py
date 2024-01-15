@@ -9,6 +9,7 @@ from jax.experimental.maps import Mesh
 from collections import deque
 import jax
 from tqdm.auto import tqdm
+from JaxSeq.utils import Dataset, IterableDataset, block_sequences, BlockingStrategy
 from jax_utils.data import Dataset, dataloader
 from jax_utils.logs import combine_logs, label_logs, log, pull_logs
 import os

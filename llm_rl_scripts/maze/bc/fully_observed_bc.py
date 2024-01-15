@@ -10,7 +10,7 @@ import optax
 from JaxSeq.models.gpt2.interface import GPT2Train, GPT2Inference
 from JaxSeq.models.gpt2.load import load_train_state, ModelLoadMode
 import pickle as pkl
-from JaxSeq.data import Seq2SeqIterableDataset
+from JaxSeq.data import Seq2SeqDataset
 from JaxSeq.train import eval_loss, train_loop
 from jaxtyping import PyTree
 import re
@@ -53,8 +53,8 @@ def main(
     init_lr: float=0.0, 
     end_lr: float=0.0001, 
     lr: float=0.0001, 
-    lr_warmup_steps: int=1000, 
-    lr_decay_steps: int=1001, # no decay, so just needs to be > warmup steps
+    lr_warmup_steps: int=1, 
+    lr_decay_steps: int=2, # no decay, so just needs to be > warmup steps
     bf16_momentum: bool=False, 
     multiply_by_parameter_scale: bool=True, 
 
@@ -66,7 +66,7 @@ def main(
     bf16_activations: bool=False, 
 
     max_input_length: int=256, 
-    max_output_length: int=16, 
+    max_output_length: int=8, 
 
     policy_do_sample: bool=True, 
     policy_num_beams: int=1, 
@@ -112,26 +112,25 @@ def main(
     
     with open(convert_path(train_data_path), "r") as f:
         all_items = list(f)
-    # create splits
-    random.seed(0)
-    random.shuffle(all_items)
-    train_items = all_items[:int(len(all_items)*eval_frac)]
-    eval_items = all_items[int(len(all_items)*eval_frac):]
     
-    def str_iterable(items: List[str]):
+    def str_lst(items: List[str]):
+        lst = []
         for item in items:
             obj = json.loads(item)
-            yield {"in_text": obj["state"], "out_text": obj["action"]}
-            # for i in range(0, len(obj['text_history']), 2):
-            #     start_idx = max(0, i-traj_max_length)
-            #     in_text = " ".join(obj['text_history'][start_idx:i+1])
-            #     out_text = obj['text_history'][i+1]
-            #     yield {"in_text":in_text, "out_text":out_text}
+            for state_action_pair in obj:
+                lst.append((state_action_pair["state"], state_action_pair["action"]))
+        return lst
     
-    train_data = Seq2SeqIterableDataset.from_str_iterable(
-        MapIterable(
-            lambda x: (tokenizer.bos_token+x['in_text'].removeprefix(tokenizer.bos_token), x['out_text']), 
-            str_iterable(train_items)), 
+    # create splits
+    data_lst = str_lst(all_items)
+    random.seed(0)
+    random.shuffle(data_lst)
+    train_lst = data_lst[:int(len(data_lst)*eval_frac)]
+    eval_lst = data_lst[int(len(data_lst)*eval_frac):]
+    
+    
+    train_data = Seq2SeqDataset.from_str_list(
+        train_lst, 
         tokenizer=tokenizer, 
         in_blocking_strategy=BlockingStrategy(
             padding=Padding.LEFT, 
@@ -145,10 +144,8 @@ def main(
         ), 
     )
 
-    eval_data = Seq2SeqIterableDataset.from_str_iterable(
-        MapIterable(
-            lambda x: (tokenizer.bos_token+x['in_text'].removeprefix(tokenizer.bos_token), x['out_text']), 
-            str_iterable(eval_items)), 
+    eval_data = Seq2SeqDataset.from_str_list(
+        eval_lst, 
         tokenizer=tokenizer, 
         in_blocking_strategy=BlockingStrategy(
             padding=Padding.LEFT, 

@@ -330,6 +330,9 @@ def main(
             out_str_process=lambda x: x.removesuffix('\n')+'\n', 
         )
 
+        loss_fn = 
+        
+
         loss_metrics = eval_loss(
             inference=inference, 
             dataset=eval_data, 
