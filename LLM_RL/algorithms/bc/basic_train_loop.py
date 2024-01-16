@@ -9,13 +9,13 @@ from jax.experimental.maps import Mesh
 from collections import deque
 import jax
 from tqdm.auto import tqdm
-from JaxSeq.utils import Dataset, IterableDataset, block_sequences, BlockingStrategy
-from jax_utils.data import Dataset, dataloader
-from jax_utils.logs import combine_logs, label_logs, log, pull_logs
+from JaxSeq.utils import Dataset, IterableDataset, block_sequences, BlockingStrategy, dataloader
+from log_utils import combine_logs, label_logs, log, pull_logs
 import os
 from transformers.modeling_flax_utils import FlaxPreTrainedModel
 import wandb
 from LLM_RL.algorithms.bc.data import BCDataset, BCIterableDataset
+from JaxSeq.bucket_manager import open_with_bucket as open
 
 def eval_loop(
     inference: BCInference, 
@@ -72,7 +72,6 @@ def train_loop(
     gcloud_token: Optional[Any]=None, 
 ) -> Tuple[BCTrainer, BCInference]:
 
-    from utils.gcs_manager import open_pp as open
     open = partial(open, gcloud_project=gcloud_project, gcloud_token=gcloud_token)
     
     # initalize wandb

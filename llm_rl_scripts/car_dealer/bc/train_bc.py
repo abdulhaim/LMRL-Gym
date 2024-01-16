@@ -6,7 +6,6 @@ from JaxSeq.optimizers import GPT3Optimizer
 from LLM_RL.algorithms.ppo.gpt2.interface import GPT2PPOPolicy
 from JaxSeq.utils import convert_path, load_mesh, setup_experiment_save, MapIterable, BlockingStrategy, Padding, Truncation
 from JaxSeq.utils import get_weight_decay_mask
-# from jax_models.gpt2 import load_gpt2_model
 from JaxSeq.models.gpt2.load import load_train_state, ModelLoadMode, load_params
 import numpy as np
 from jax.experimental.maps import Mesh
@@ -16,7 +15,7 @@ from functools import partial
 from LLM_RL.environment import text_env_eval
 from llm_rl_scripts.car_dealer.env.policies import text_history_to_str
 from LLM_RL.environment import TokenHistory
-from JaxSeq.utils import convert_path,
+from JaxSeq.utils import convert_path
 import os
 import pickle as pkl
 import json
@@ -257,12 +256,12 @@ def main(
     # model.config.embd_pdrop = embd_pdrop
     # model.config.attn_pdrop = attn_pdrop
 
-    loop_state = dict()
-    if should_restore_loop_state and (model_load_mode in {ModelLoadMode.TRAIN_STATE, 
-                                                          ModelLoadMode.TRAIN_STATE_PARAMS, 
-                                                          ModelLoadMode.PARAMS}):
-        with open(os.path.join(convert_path(model_load_path), 'loop_state.pkl'), 'rb') as f:
-            loop_state = pkl.load(f)
+    # loop_state = dict()
+    # if should_restore_loop_state and (model_load_mode in {ModelLoadMode.TRAIN_STATE, 
+    #                                                       ModelLoadMode.TRAIN_STATE_PARAMS, 
+    #                                                       ModelLoadMode.PARAMS}):
+    #     with open(os.path.join(convert_path(model_load_path), 'loop_state.pkl'), 'rb') as f:
+    #         loop_state = pkl.load(f)
 
     print("loading trainer and inference")    
     trainer = GPT2TrainMask.load_train(
@@ -330,17 +329,15 @@ def main(
             out_str_process=lambda x: x.removesuffix('\n')+'\n', 
         )
 
-        loss_fn = 
-        
-
-        loss_metrics = eval_loss(
+        data_results = eval_loop(
             inference=inference, 
             dataset=eval_data, 
-            prng_key=None, 
-            bsize=eval_loss_bsize, 
-            eval_batches=eval_loss_batches, 
+            rng=jax.random.PRNGKey(1), 
+            bsize=32, 
+            prefetch_batches=None, 
+            eval_batches=16, 
         )
-
+        
         interation_raw_results, interaction_summary_results = text_env_eval(
             env=env, 
             policy=policy, 
@@ -353,7 +350,7 @@ def main(
             print(text_history_to_str(item[-1].post_transition_history))
             print('='*25)
 
-        return loss_metrics['loss'], {'loss_metrics': loss_metrics, 'generation_metrics': interaction_summary_results}
+        return data_results['loss'], {'loss_metrics': data_results, 'generation_metrics': interaction_summary_results}
     
     train_prng = jax.random.PRNGKey(1)
     save_dtype = jnp.bfloat16 if save_bf16 else jnp.float32
@@ -362,30 +359,21 @@ def main(
         inference=inference, 
         evaluator=evaluator, 
         dataset=train_data, 
-        prng_key=train_prng, 
+        rng=train_prng, 
         save_dir=save_dir, 
         epochs=epochs, 
         max_steps=max_steps, 
         bsize=train_bsize, 
         log_every=log_every, 
-        eval_every_steps=eval_every_steps, 
-        eval_every_epochs=eval_every_epochs, 
-        eval_at_beginning=eval_at_beginning, 
-        eval_at_end=eval_at_end, 
-        save_every_steps=save_every_steps, 
-        save_every_epochs=save_every_epochs, 
-        save_at_beginning=save_at_beginning, 
+        eval_every=eval_every_steps,  
+        eval_at_beginning=eval_at_beginning,  
+        save_every=save_every_steps,  
         save_at_end=save_at_end, 
-        save_best=save_best, 
-        max_checkpoints=max_checkpoints, 
-        save_train_state=save_train_state, 
-        save_dtype=save_dtype, 
+        save_best=save_best,  
         use_wandb=use_wandb, 
         wandb_project=wandb_project, 
         wandb_run_name=exp_name, 
-        wandb_config=None, 
-        is_main_process=is_main_process, 
-        **loop_state, 
+        wandb_config=None,  
     )
 
 if __name__ == "__main__":
