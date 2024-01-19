@@ -3,24 +3,20 @@ from collections import namedtuple
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import jax
-from jax_utils.shard_utils import set_partitions, _id_fn
 from flax.core.frozen_dict import freeze
 import jax.numpy as jnp
 from flax.core.frozen_dict import freeze, unfreeze
 from jax.experimental.maps import Mesh
 import numpy as np
-from jax_utils.multihost_shard_utils import host_param_shard
 from jax.random import KeyArray
 from optax import softmax_cross_entropy_with_integer_labels
 from flax.core.frozen_dict import FrozenDict
 import optax
 from jaxtyping import PyTree
 from transformers.modeling_flax_utils import FlaxPreTrainedModel
-from environment import TextHistory
-from algorithms.jax_agent import Inference, StepOutput, Trainer
+from environment import TextHistory, TokenHistory
 from jax_utils.data import block_sequences
-from algorithms.jax_bc.data import block_token_histories
-from token_history import text_history_to_token_history
+from LLM_RL.algorithms.bc.data import block_token_histories
 from transformers.tokenization_utils import PreTrainedTokenizer
 from jax.experimental.pjit import pjit, with_sharding_constraint
 from flax import struct
@@ -47,10 +43,12 @@ def bc_loss(
 
 # main interface objects
 
+StepOutput = namedtuple('StepOutput', ['loss', 'info', 'params', 'optim_state'])
+
 class BCTrainer(Trainer):    
     def train_step_from_text_history(self, text_histories: List[TextHistory], max_len: Optional[int], rng_key: KeyArray) -> Tuple[jnp.ndarray, Dict[str, Any], BCTrainer]:
 
-        token_histories = [text_history_to_token_history(text_history, self.tokenizer) for text_history in text_histories]
+        token_histories = [TokenHistory.from_text_history(text_history, self.tokenizer) for text_history in text_histories]
 
         tokens, is_action = block_token_histories(token_histories, max_len, self.tokenizer.pad_token_id)
         
@@ -61,6 +59,49 @@ class BCTrainer(Trainer):
         )
 
         return loss, info, new_trainer
+    
+class Inference(struct.PyTreeNode):
+    params: PyTree
+    tokenizer: PreTrainedTokenizer = struct.field(pytree_node=False)
+    generate_fn: Callable[[PyTree, KeyArray, jnp.ndarray, Dict[str, Any]], jnp.ndarray] = struct.field(pytree_node=False)
+
+    def update_params(self, params: PyTree) -> Inference:
+        return self.replace(params=params)
+    
+    def generate(self, in_tokens: jnp.ndarray, rng_key: KeyArray, 
+                 **generation_kwargs: Dict[str, Any]) -> jnp.ndarray:
+        
+        outputs = self.generate_fn(self.params, rng_key, in_tokens, freeze(generation_kwargs))
+        
+        return outputs
+    
+    def generate_from_str(self, in_strs: List[str], max_input_length: Optional[int], 
+                          rng_key: KeyArray, **generation_kwargs: Dict[str, Any]) -> List[str]:
+        
+        tokens = [self.tokenizer.encode(item) for item in in_strs]
+        tokens = block_sequences(tokens, max_len=max_input_length, pad_value=self.tokenizer.pad_token_id, dtype=np.int32)
+        
+        outputs = self.generate(
+            jnp.asarray(tokens, dtype=jnp.int32), 
+            rng_key, 
+            **generation_kwargs
+        )
+
+        output_strs = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)
+        
+        return output_strs
+
+class Trainer(struct.PyTreeNode):
+    params: PyTree
+    optim_state: PyTree
+    tokenizer: PreTrainedTokenizer = struct.field(pytree_node=False)
+    train_fn: Callable[[PyTree, PyTree, KeyArray, PyTree], StepOutput] = struct.field(pytree_node=False)
+    
+    def train_step(self, batch: PyTree, rng_key: KeyArray) -> Tuple[jnp.ndarray, Dict[str, Any], Trainer]:
+        
+        loss, info, new_params, new_optim_state = self.train_fn(self.params, self.optim_state, rng_key, batch)
+
+        return loss, info, self.replace(params=new_params, optim_state=new_optim_state)
 
 class BCInference(Inference):
     logit_fn: Callable[[PyTree, jnp.ndarray], jnp.ndarray] = struct.field(pytree_node=False)

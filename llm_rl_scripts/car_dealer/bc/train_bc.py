@@ -51,7 +51,6 @@ def main(
     checkpoint_is_sharded: bool=True, 
 
     data_path: Optional[str]='data/car_dealer', 
-    output_path: Optional[str]='outputs/car_dealer', 
 
     use_wandb: bool=False, 
     wandb_project: Optional[str]='car-dealer-bc', 
