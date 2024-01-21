@@ -41,7 +41,6 @@ def main(
     eval_data_path: str, 
     oracle_model_mode: str,
     oracle_model_path: str,
-    vocab_file: str, 
 
     /,  # Mark the end of positional arguments.
 

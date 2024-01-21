@@ -42,6 +42,8 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
         if seed is not None:
             self.random = random.Random(seed)
 
+        if options is None:
+            options = {}
         deterministic = options.get("deterministic", False)
         if deterministic:
             assert seed is not None, "In deterministic mode, the seed specifies which word to use."

@@ -11,7 +11,7 @@ import optax
 from JaxSeq.models.gpt2.interface import GPT2TrainMask, GPT2InferenceMask
 from JaxSeq.models.gpt2.load import load_train_state, ModelLoadMode
 import pickle as pkl
-from JaxSeq.data import MaskDataset
+from JaxSeq.data import MaskDataset, MaskIterableDataset
 from JaxSeq.train import eval_loss, train_loop
 from transformers.generation import GenerationConfig
 from jaxtyping import PyTree
@@ -49,9 +49,9 @@ def main(
     max_steps: Optional[int]=None, 
 
     weight_decay: float=0.001, 
-    init_lr: float=0.0, 
-    end_lr: float=0.002, 
-    lr: float=0.001, 
+    init_lr: float=0.0001, 
+    end_lr: float=0.0001, 
+    lr: float=0.0001, 
     lr_warmup_steps: int=1000, 
     lr_decay_steps: int=1001, # no decay, so just needs to be > warmup steps
     bf16_momentum: bool=False, 
@@ -61,15 +61,15 @@ def main(
     attn_pdrop: float=0.05, 
     embd_pdrop: float=0.05, 
 
-    train_bsize: int=16, 
-    grad_accum_steps: Optional[int]=None, 
+    train_bsize: int=4, 
+    grad_accum_steps: Optional[int]=32, 
 
     gradient_checkpointing: bool=False, 
     gradient_checkpointing_policy: str='nothing_saveable', 
 
     bf16_activations: bool=False, 
 
-    max_length: int=2048, 
+    max_length: int=1024, 
 
     log_every: int=256, 
     eval_every_steps: Optional[int]=256, 
@@ -131,7 +131,7 @@ def main(
     eval_text_trajectories = create_trajectories_from_conversations(raw_eval)
 
     def convert_trajectory_to_masked_text(trajectories):
-        for trajectory in trajectories
+        for trajectory in trajectories:
             text_history = trajectory.text_history
             lst = []
             for text in text_history:
@@ -142,7 +142,7 @@ def main(
     # train_text_histories = [convert_trajectory_to_masked_text(text_trajectory) for text_trajectory in train_text_trajectories]
     # eval_text_histories = [convert_trajectory_to_masked_text(text_trajectory) for text_trajectory in eval_text_trajectories]
 
-    train_data = MaskDataset.blocked_from_str_segments_list(
+    train_data = MaskIterableDataset.blocked_from_str_segments_iterable(
         convert_trajectory_to_masked_text(train_text_trajectories), 
         tokenizer, 
         blocking_strategy=BlockingStrategy(
@@ -152,7 +152,7 @@ def main(
         ), 
     )
 
-    eval_data = MaskDataset.blocked_from_str_segments_list(
+    eval_data = MaskIterableDataset.blocked_from_str_segments_iterable(
         convert_trajectory_to_masked_text(eval_text_trajectories), 
         tokenizer, 
         blocking_strategy=BlockingStrategy(
