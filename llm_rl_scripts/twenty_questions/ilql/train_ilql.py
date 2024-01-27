@@ -38,8 +38,8 @@ def main(
     model_load_mode: ModelLoadMode, 
     model_load_path: str, 
     train_data_path: str, 
-    eval_data_path: str, 
-    vocab_file: str, 
+    eval_data_path: str,
+    oracle_model_path: str,
 
     /,  # Mark the end of positional arguments.
 
@@ -113,7 +113,9 @@ def main(
     tau: float=0.7, 
     cql_weight: float=0.01, 
 ):
-    input_args = locals()
+    nltk.download('punkt')
+    nltk.download('averaged_perceptron_tagger')
+    input_args = dict(locals())
     print(input_args)
 
     tokenizer = AutoTokenizer.from_pretrained('gpt2')
@@ -366,6 +368,7 @@ def main(
         loss_fn=loss_fn, 
     )
     
+    oracle_prng = jax.random.PRNGKey(7)
     env = TwentyQuestionsPolicyEnvironment(
         oracle=T5Oracle.load_oracle(
             mesh=mesh,

@@ -11,7 +11,7 @@ import optax
 from JaxSeq.models.gpt2.interface import GPT2TrainMask, GPT2InferenceMask
 from JaxSeq.models.gpt2.load import load_train_state, ModelLoadMode
 import pickle as pkl
-from JaxSeq.data import MaskIterableDataset
+from JaxSeq.data import MaskDataset, MaskIterableDataset
 from JaxSeq.train import eval_loss, train_loop
 from transformers.generation import GenerationConfig
 from jaxtyping import PyTree
@@ -24,6 +24,8 @@ from llm_rl_scripts.twenty_questions.env.env import TwentyQuestionsPolicyEnviron
 from llm_rl_scripts.twenty_questions.env.oracle import T5Oracle
 from llm_rl_scripts.twenty_questions.env.oracle import T5ModelLoadMode as T5OracleModelLoadMode
 from llm_rl_scripts.twenty_questions.env.data import create_trajectories_from_conversations, asker_postproc, asker_postproc_simple, asker_postproc_filter_repeats, get_default_word_list
+from IPython import embed
+import nltk
 
 def main(
     model_load_mode: ModelLoadMode, 
@@ -47,9 +49,9 @@ def main(
     max_steps: Optional[int]=None, 
 
     weight_decay: float=0.001, 
-    init_lr: float=0.0, 
-    end_lr: float=0.002, 
-    lr: float=0.001, 
+    init_lr: float=0.0001, 
+    end_lr: float=0.0001, 
+    lr: float=0.0001, 
     lr_warmup_steps: int=1000, 
     lr_decay_steps: int=1001, # no decay, so just needs to be > warmup steps
     bf16_momentum: bool=False, 
@@ -59,15 +61,15 @@ def main(
     attn_pdrop: float=0.05, 
     embd_pdrop: float=0.05, 
 
-    train_bsize: int=16, 
-    grad_accum_steps: Optional[int]=None, 
+    train_bsize: int=4, 
+    grad_accum_steps: Optional[int]=32, 
 
     gradient_checkpointing: bool=False, 
     gradient_checkpointing_policy: str='nothing_saveable', 
 
     bf16_activations: bool=False, 
 
-    max_length: int=2048, 
+    max_length: int=1024, 
 
     log_every: int=256, 
     eval_every_steps: Optional[int]=256, 
@@ -101,13 +103,20 @@ def main(
 
     should_restore_loop_state: bool=False, 
 ):
+    def convert_trajectory_to_masked_text(trajectories):
+        for trajectory in trajectories:
+            text_history = trajectory.text_history
+            lst = []
+            for text in text_history:
+                item = (text.text, text.is_action)
+                lst.append(item)
+            yield lst
 
-    import nltk
     nltk.download('punkt')
     nltk.download('averaged_perceptron_tagger')
-    input_args = locals()
+    input_args = dict(locals())
     print(input_args)
-
+    
     tokenizer = AutoTokenizer.from_pretrained('gpt2')
     tokenizer.add_special_tokens({'pad_token': '<|pad|>'})
 
@@ -126,7 +135,7 @@ def main(
     eval_text_trajectories = create_trajectories_from_conversations(raw_eval)
 
     train_data = MaskIterableDataset.blocked_from_str_segments_iterable(
-        MapIterable(lambda x: train_text_histories, raw_train), 
+        convert_trajectory_to_masked_text(train_text_trajectories), 
         tokenizer, 
         blocking_strategy=BlockingStrategy(
             padding=Padding.RIGHT, 
@@ -136,7 +145,7 @@ def main(
     )
 
     eval_data = MaskIterableDataset.blocked_from_str_segments_iterable(
-        MapIterable(lambda x: train_text_histories, raw_eval), 
+        convert_trajectory_to_masked_text(eval_text_trajectories), 
         tokenizer, 
         blocking_strategy=BlockingStrategy(
             padding=Padding.RIGHT, 

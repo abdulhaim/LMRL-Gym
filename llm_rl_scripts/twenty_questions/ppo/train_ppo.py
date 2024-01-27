@@ -35,11 +35,17 @@ from llm_rl_scripts.wordle.env.game import Vocabulary
 from dataclasses import replace
 from JaxSeq.models.gpt2.interface import loss_fn_mask
 
+from llm_rl_scripts.twenty_questions.env.env import TwentyQuestionsPolicyEnvironment
+from llm_rl_scripts.twenty_questions.env.oracle import T5Oracle
+from llm_rl_scripts.twenty_questions.env.oracle import T5ModelLoadMode as T5OracleModelLoadMode
+from llm_rl_scripts.twenty_questions.env.data import get_default_word_list, create_conversation_from_history
+
 def main(
     model_load_mode: ModelLoadMode, 
     model_load_path: str, 
     bc_data_path: str, 
-    vocab_file: str, 
+    oracle_model_mode: T5OracleModelLoadMode,
+    oracle_model_path: str,
 
     /,  # Mark the end of positional arguments.
 
@@ -204,19 +210,14 @@ def main(
         tokenizer=tokenizer, 
     )
 
-    vocab = Vocabulary.from_file(
-        vocab_file=vocab_file, 
-        fill_cache=False, 
-    )
-
     env = TwentyQuestionsPolicyEnvironment(
         oracle=T5Oracle.load_oracle(
             mesh=mesh,
             prng_key=oracle_prng,
             model_load_mode=oracle_model_mode,
             model_load_path=oracle_model_path,
-            use_fp16_activations=use_fp16_activations,
-            use_fp16_params=use_fp16_params,
+            use_fp16_activations=False,
+            use_fp16_params=False,
             max_input_length=124,
             max_output_length=4,
         ),

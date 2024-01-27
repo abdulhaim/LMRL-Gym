@@ -34,8 +34,8 @@ def main(
     model_load_mode: ModelLoadMode, 
     model_load_path: str, 
     train_data_path: str, 
-    eval_data_path: str, 
-    vocab_file: str, 
+    eval_data_path: str,
+    oracle_model_path: str,
 
     /,  # Mark the end of positional arguments.
 
@@ -52,24 +52,38 @@ def main(
     epochs: int=1, 
     max_steps: Optional[int]=None, 
     
-    lr: float=1e-5, 
-    weight_decay: float=0.0, 
+    weight_decay: float=0.001, 
+    init_lr: float=0.0001, 
+    end_lr: float=0.0001, 
+    lr: float=0.0001, 
+    lr_warmup_steps: int=1000, 
+    lr_decay_steps: int=1001, # no decay, so just needs to be > warmup steps
+    bf16_momentum: bool=False, 
+    multiply_by_parameter_scale: bool=True, 
+
+    resid_pdrop: float=0.05, 
+    attn_pdrop: float=0.05, 
+    embd_pdrop: float=0.05, 
+
+    train_bsize: int=4, 
+    grad_accum_steps: Optional[int]=32, 
 
     train_bsize: int=32, 
-    grad_accum_steps: int=1, 
+    grad_accum_steps: Optional[int]=32, 
 
-    bf16_activations: bool=False, 
     gradient_checkpointing: bool=False, 
     gradient_checkpointing_policy: str='nothing_saveable', 
 
-    max_length: int=512, 
+    bf16_activations: bool=False, 
+
+    max_length: int=1024, 
 
     log_every: int=256, 
-    eval_every_steps: Optional[int]=None, 
+    eval_every_steps: Optional[int]=256, 
     eval_every_epochs: Optional[int]=None, 
     eval_at_beginning: bool=False, 
     eval_at_end: bool=True, 
-
+    
     save_every_steps: Optional[int]=None, 
     save_every_epochs: Optional[int]=None, 
     save_at_beginning: bool=False, 
@@ -79,6 +93,11 @@ def main(
     save_train_state: bool=True, 
     save_bf16: bool=True, 
 
+    eval_loss_bsize: int=32, 
+    eval_loss_batches: Optional[int]=None, 
+
+    policy_n_rollouts: int=32, 
+    policy_bsize: int=1, 
     policy_max_input_length: int=256, 
     policy_max_output_length: int=256, 
     policy_do_sample: bool=True, 
@@ -87,25 +106,16 @@ def main(
     policy_top_p: Optional[float]=None, 
     policy_top_k: Optional[int]=None, 
 
-    policy_bsize: int=32, 
-    policy_n_rollouts: int=32, 
-
-    eval_loss_bsize: int=32, 
-    eval_loss_batches: Optional[int]=None, 
-
     force_pad_embeddings: bool=False, 
 
     should_restore_loop_state: bool=False, 
-
-    beta: float=16.0, 
-    detach_q: bool=False, 
-    gamma: float=0.99, 
-    cql_weight: float=0.01, 
 ):
-    input_args = locals()
+    nltk.download('punkt')
+    nltk.download('averaged_perceptron_tagger')
+    input_args = dict(locals())
     print(input_args)
 
-    tokenizer = AutoTokenizer.from_pretrained('EleutherAI/gpt-j-6B')
+    tokenizer = AutoTokenizer.from_pretrained('gpt2')
     tokenizer.add_special_tokens({'pad_token': '<|pad|>'})
 
     mesh = load_mesh((data_mesh_shape, fsdp_mesh_shape, model_mesh_shape), ('dp', 'fsdp', 'mp'))
