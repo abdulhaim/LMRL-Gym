@@ -94,7 +94,7 @@ def main(
     policy_top_p: Optional[float]=None, 
     policy_top_k: Optional[int]=None, 
 
-    policy_bsize: int=32, 
+    policy_bsize: int=2, 
     policy_n_rollouts: int=32, 
 
     eval_loss_bsize: int=32, 

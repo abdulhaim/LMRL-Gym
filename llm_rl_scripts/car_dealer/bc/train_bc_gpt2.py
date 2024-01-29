@@ -1,42 +1,39 @@
+import jax
 from typing import Optional
 import tyro
 from JaxSeq.bucket_manager import open_with_bucket as open
 from transformers import AutoTokenizer
 from JaxSeq.utils import jsonl_stream, convert_path, load_mesh, setup_experiment_save
-import jax
 import jax.numpy as jnp
-from JaxSeq.utils import BlockingStrategy, Padding, Truncation, get_weight_decay_mask, MapIterable, jsonl_stream, FileOpenIterable
+from JaxSeq.utils import BlockingStrategy, Padding, Truncation, get_weight_decay_mask, MapIterable, FileOpenIterable
 import os
 import optax
-from JaxSeq.models.gpt2.load import load_train_state, ModelLoadMode
-from LLM_RL.algorithms.mc_returns.base_interface import mc_loss
+from JaxSeq.models.gpt2.interface import GPT2TrainMask, GPT2InferenceMask
+from JaxSeq.models.gpt2.load import load_train_state, ModelLoadMode, load_params
+import pickle as pkl
+from JaxSeq.data import MaskDataset, MaskIterableDataset
+from JaxSeq.train import eval_loss, train_loop
 from transformers.generation import GenerationConfig
 from jaxtyping import PyTree
 import re
-from LLM_RL.environment import Text, text_env_eval, TextTrajectory, TextTrajectoryChain, TokenTrajectoryChain, text_history_to_str
-from LLM_RL.algorithms.value_rl_base.gpt2.interface import GPT2ValuePolicy
-from LLM_RL.heads.linear_head import load_train_state_from_config as load_head_train_state_from_config
-from LLM_RL.heads.linear_head import LinearHeadConfig
-from JaxSeq.shard_model import copy_sharded_pytree
-from functools import partial
-from JaxSeq.logs import log, pull_logs
-from LLM_RL.algorithms.mc_returns.train import train_loop, eval_loss
-from LLM_RL.algorithms.mc_returns.data import MCData, MCIterableDataset
-from LLM_RL.algorithms.mc_returns.gpt2.interface import GPT2MCTrain, GPT2MCInference
-
+from JaxSeq.optimizers import GPT3Optimizer
+from LLM_RL.algorithms.ppo.gpt2.interface import GPT2PPOPolicy
+from LLM_RL.environment import text_history_to_str, text_env_eval
+import json
+from llm_rl_scripts.car_dealer.env.env import BatchedCarDealerPolicyEnvironment 
 from llm_rl_scripts.twenty_questions.env.env import TwentyQuestionsPolicyEnvironment
 from llm_rl_scripts.twenty_questions.env.oracle import T5Oracle
 from llm_rl_scripts.twenty_questions.env.oracle import T5ModelLoadMode as T5OracleModelLoadMode
-from llm_rl_scripts.twenty_questions.env.data import create_trajectories_from_conversations, get_default_word_list, create_conversation_from_history 
-import json
+from llm_rl_scripts.twenty_questions.env.data import create_trajectories_from_conversations, asker_postproc, asker_postproc_simple, asker_postproc_filter_repeats, get_default_word_list
+from IPython import embed
+import nltk
 
 def main(
     model_load_mode: ModelLoadMode, 
     model_load_path: str, 
     train_data_path: str, 
-    eval_data_path: str, 
+    eval_data_path: str,
     oracle_model_path: str,
-
     /,  # Mark the end of positional arguments.
 
     exp_name: Optional[str]=None, 
@@ -51,25 +48,36 @@ def main(
 
     epochs: int=1, 
     max_steps: Optional[int]=None, 
-    
-    lr: float=1e-5, 
-    weight_decay: float=0.0, 
 
-    train_bsize: int=32, 
-    grad_accum_steps: int=1, 
+    weight_decay: float=0.001, 
+    init_lr: float=0.0001, 
+    end_lr: float=0.0001, 
+    lr: float=0.0001, 
+    lr_warmup_steps: int=1000, 
+    lr_decay_steps: int=1001, # no decay, so just needs to be > warmup steps
+    bf16_momentum: bool=False, 
+    multiply_by_parameter_scale: bool=True, 
 
-    bf16_activations: bool=False, 
+    resid_pdrop: float=0.05, 
+    attn_pdrop: float=0.05, 
+    embd_pdrop: float=0.05, 
+
+    train_bsize: int=4, 
+    grad_accum_steps: Optional[int]=32, 
+
     gradient_checkpointing: bool=False, 
     gradient_checkpointing_policy: str='nothing_saveable', 
 
-    max_length: int=512, 
+    bf16_activations: bool=False, 
+
+    max_length: int=1024, 
 
     log_every: int=256, 
-    eval_every_steps: Optional[int]=None, 
+    eval_every_steps: Optional[int]=256, 
     eval_every_epochs: Optional[int]=None, 
     eval_at_beginning: bool=False, 
     eval_at_end: bool=True, 
-
+    
     save_every_steps: Optional[int]=None, 
     save_every_epochs: Optional[int]=None, 
     save_at_beginning: bool=False, 
@@ -79,6 +87,11 @@ def main(
     save_train_state: bool=True, 
     save_bf16: bool=True, 
 
+    eval_loss_bsize: int=32, 
+    eval_loss_batches: Optional[int]=None, 
+
+    policy_n_rollouts: int=32, 
+    policy_bsize: int=1, 
     policy_max_input_length: int=256, 
     policy_max_output_length: int=256, 
     policy_do_sample: bool=True, 
@@ -87,69 +100,94 @@ def main(
     policy_top_p: Optional[float]=None, 
     policy_top_k: Optional[int]=None, 
 
-    policy_bsize: int=2, 
-    policy_n_rollouts: int=32, 
-
-    eval_loss_bsize: int=32, 
-    eval_loss_batches: Optional[int]=None, 
-
     force_pad_embeddings: bool=False, 
 
     should_restore_loop_state: bool=False, 
-
-    beta: float=16.0, 
-    detach_q: bool=False, 
-    gamma: float=0.99, 
-    cql_weight: float=0.01, 
 ):
-    input_args = locals()
-    print(input_args)
+    
+    nltk.download('punkt')
+    nltk.download('averaged_perceptron_tagger')
+    input_args = dict(locals())
 
-    tokenizer = AutoTokenizer.from_pretrained('EleutherAI/gpt-j-6B')
+    print(input_args)
+    print(type(input_args))
+    # embed()
+
+    tokenizer = AutoTokenizer.from_pretrained('gpt2')
     tokenizer.add_special_tokens({'pad_token': '<|pad|>'})
 
     mesh = load_mesh((data_mesh_shape, fsdp_mesh_shape, model_mesh_shape), ('dp', 'fsdp', 'mp'))
     is_main_process = jax.process_index() == 0
     print(f"Mesh: {mesh}")
     print(f"Is main process: {is_main_process}")
-    
+
     # load data
     with open(convert_path(train_data_path), 'r') as f:
         raw_train = json.load(f)
     with open(convert_path(eval_data_path), 'r') as f:
         raw_eval = json.load(f)
 
-    train_text_trajectories = create_trajectories_from_conversations(raw_train)
-    eval_text_trajectories = create_trajectories_from_conversations(raw_eval)
+    train_text_trajectories = []
+    eval_text_trajectories = []
+    for personality, convos in raw_train.items():
+        train_text_trajectories.extend(create_trajectories_from_conversations(convos))
+    for personality, convos in raw_eval.items():
+        eval_text_trajectories.extend(create_trajectories_from_conversations(convos))
 
-    def mc_data_generator(trajectories):
+    def convert_trajectory_to_masked_text(trajectories):
         for trajectory in trajectories:
-            trajectory_chain = TextTrajectoryChain(text_trajectory=trajectory, 
-                                                   next=None,)
-            token_trajectory = TokenTrajectoryChain.from_text_trajectory_chain(trajectory_chain, tokenizer)
-            yield MCData.from_token_trajectory_chain(token_trajectory, gamma=gamma)
+            text_history = trajectory.text_history
+            lst = []
+            for text in text_history:
+                item = (text.text, text.is_action)
+                lst.append(item)
+            yield lst
+    
+    # train_text_histories = [convert_trajectory_to_masked_text(text_trajectory) for text_trajectory in train_text_trajectories]
+    # eval_text_histories = [convert_trajectory_to_masked_text(text_trajectory) for text_trajectory in eval_text_trajectories]
 
-    train_dataset = MCIterableDataset.from_mc_data_iterable(
-        mc_data_generator(train_text_trajectories),
+    train_data = MaskIterableDataset.blocked_from_str_segments_iterable(
+        convert_trajectory_to_masked_text(train_text_trajectories), 
         tokenizer, 
-        BlockingStrategy(
+        blocking_strategy=BlockingStrategy(
             padding=Padding.RIGHT, 
-            truncation=Truncation.RIGHT, 
+            truncation=Truncation.LEFT, 
             max_length=max_length, 
         ), 
     )
 
-    eval_dataset = MCIterableDataset.from_mc_data_iterable(
-        mc_data_generator(eval_text_trajectories),
+    eval_data = MaskIterableDataset.blocked_from_str_segments_iterable(
+        convert_trajectory_to_masked_text(eval_text_trajectories), 
         tokenizer, 
-        BlockingStrategy(
+        blocking_strategy=BlockingStrategy(
             padding=Padding.RIGHT, 
-            truncation=Truncation.RIGHT, 
+            truncation=Truncation.LEFT, 
             max_length=max_length, 
         ), 
     )
 
-    def policy_optim_getter(params: PyTree):
+    prng_key = jax.random.PRNGKey(3)
+    prng_key, oracle_inference_prng, buyer_policy_prng = jax.random.split(prng_key, 3)
+    buyer_params, buyer_model = load_params(
+        model_load_mode=ModelLoadMode.PARAMS, 
+        model_load_path=convert_path(oracle_model_path) if model_load_mode != ModelLoadMode.HF else buyer_model_path, 
+        model_dtype=jnp.bfloat16 if bf16_activations else jnp.float32, 
+        tokenizer=tokenizer, 
+        mesh=mesh, 
+        prng_key=oracle_inference_prng, 
+        force_pad_embeddings=force_pad_embeddings, 
+        params_dtype=jnp.float32, 
+    )
+
+    model_prng_key = jax.random.PRNGKey(2)
+    policy_prng, oracle_prng = jax.random.split(model_prng_key)
+
+    env = BatchedCarDealerPolicyEnvironment(
+        buyer=buyer_model, 
+        bsize=8,
+    )
+
+    def optim_getter(params: PyTree):
         mask = get_weight_decay_mask((
             "".join([r"\['ln_[0-9]+'\]", re.escape("['bias']")]), 
             "".join([r"\['ln_[0-9]+'\]", re.escape("['scale']")]), 
@@ -157,67 +195,40 @@ def main(
             re.escape("['ln_f']['scale']"), 
             "bias", 
         ))(params)
-        return optax.MultiSteps(
-            optax.adamw(
-                learning_rate=lr, 
-                b1=0.9, 
-                b2=0.95, 
-                eps=1e-8, 
-                weight_decay=weight_decay, 
-                mask=mask, 
-            ), 
-            every_k_schedule=grad_accum_steps, 
-        )
-    
-    def value_head_optim_getter(params: PyTree):
-        mask = get_weight_decay_mask(("bias",))(params)
-        return optax.MultiSteps(
-            optax.adamw(
-                learning_rate=lr, 
-                b1=0.9, 
-                b2=0.95, 
-                eps=1e-8, 
-                weight_decay=weight_decay, 
-                mask=mask, 
-            ), 
-            every_k_schedule=grad_accum_steps, 
+        
+        optimizer_config = GPT3Optimizer(
+            init_lr=init_lr, 
+            end_lr=end_lr, 
+            lr=lr, 
+            lr_warmup_steps=lr_warmup_steps, 
+            lr_decay_steps=lr_decay_steps, 
+            weight_decay=weight_decay, 
+            bf16_momentum=bf16_momentum, 
+            multiply_by_parameter_scale=multiply_by_parameter_scale, 
         )
 
-    model_prng_key = jax.random.PRNGKey(3)
-    base_train_state, base_model = load_train_state(
+        optim, _ = optimizer_config.get_optim(mask)
+
+        if grad_accum_steps is not None:
+            return optax.MultiSteps(optim, every_k_schedule=grad_accum_steps)
+        return optim
+
+    train_state, model = load_train_state(
         model_load_mode=model_load_mode, 
         model_load_path=convert_path(model_load_path) if model_load_mode != ModelLoadMode.HF else model_load_path, 
         model_dtype=jnp.bfloat16 if bf16_activations else jnp.float32, 
-        optim_getter=policy_optim_getter, 
+        optim_getter=optim_getter, 
         tokenizer=tokenizer, 
         mesh=mesh, 
         prng_key=model_prng_key, 
         force_pad_embeddings=force_pad_embeddings, 
         params_dtype=jnp.float32, 
     )
-    base_model.config.gradient_checkpointing = gradient_checkpointing
-    base_model.config.gradient_checkpointing_policy = gradient_checkpointing_policy
-    pi_beta_params = copy_sharded_pytree(
-        model=base_model, 
-        pytree=base_train_state.params, 
-    )
-
-    q_prng_key = jax.random.PRNGKey(4)
-    q_head_train_state, q_head = load_head_train_state_from_config(
-        model_config=LinearHeadConfig(
-            input_dim=base_model.config.n_embd, 
-            output_dim=base_model.config.vocab_size, 
-            use_bias=True, 
-            initializer_range=0.0, 
-            bias_init=-4.4, 
-        ), 
-        model_dtype=jnp.bfloat16 if bf16_activations else jnp.float32, 
-        optim_getter=value_head_optim_getter, 
-        mesh=mesh, 
-        prng_key=q_prng_key, 
-        pad_to_output_dim=None, 
-        params_dtype=jnp.float32, 
-    )
+    model.config.gradient_checkpointing = gradient_checkpointing
+    model.config.gradient_checkpointing_policy = gradient_checkpointing_policy
+    model.config.resid_pdrop = resid_pdrop
+    model.config.embd_pdrop = embd_pdrop
+    model.config.attn_pdrop = attn_pdrop
 
     loop_state = dict()
     if should_restore_loop_state and (model_load_mode in {ModelLoadMode.TRAIN_STATE, 
@@ -225,50 +236,19 @@ def main(
                                                           ModelLoadMode.PARAMS}):
         with open(os.path.join(convert_path(model_load_path), 'loop_state.pkl'), 'rb') as f:
             loop_state = pkl.load(f)
-    
-    loss_fn = partial(mc_loss, cql_weight=cql_weight)
 
-    train = GPT2MCTrain.load_train(
-        base_train_state=base_train_state, 
-        q_head_train_state=q_head_train_state, 
-        base_model=base_model, 
-        q_head_model=q_head, 
+    trainer = GPT2TrainMask.load_train(
+        train_state=train_state, 
+        model=model, 
         tokenizer=tokenizer, 
-        loss_fn=loss_fn, 
-        detach_q=detach_q, 
     )
 
-    inference = GPT2MCInference.load_inference(
-        pi_beta_params=pi_beta_params, 
-        base_params=base_train_state.params, 
-        q_head_params=q_head_train_state.params, 
-        pi_beta_model=base_model, 
-        base_model=base_model, 
-        q_head_model=q_head, 
+    inference = GPT2InferenceMask.load_inference(
+        params=train_state.params, 
+        model=model, 
         tokenizer=tokenizer, 
-        loss_fn=loss_fn, 
-        beta=beta, 
-        dp_shard_logits=True, 
     )
-    
-    model_prng_key = jax.random.PRNGKey(2)
-    policy_prng, oracle_prng = jax.random.split(model_prng_key)
-    # oracle_model_path = "gs://rail-tpus-charles-3/JaxSeq/outputs/twenty_questions/flan-t5-xl_convos_0_1000_noprompt_lr1e-3_test1"
 
-    env = TwentyQuestionsPolicyEnvironment(
-        oracle=T5Oracle.load_oracle(
-            mesh=mesh,
-            prng_key=oracle_prng,
-            model_load_mode=T5OracleModelLoadMode.PARAMS,
-            model_load_path=oracle_model_path,
-            use_fp16_activations=False,
-            use_fp16_params=False,
-            max_input_length=124,
-            max_output_length=4,
-        ),
-        word_list=get_default_word_list(),
-        max_conversation_length=20,
-    )
     save_dir, exp_name = setup_experiment_save(
         exp_name=exp_name, 
         outputs_path=convert_path(outputs_path), 
@@ -276,12 +256,12 @@ def main(
         script__file__=__file__, 
         is_main_process=is_main_process, 
     )
-
+    save_dir = "/nfs/nfs1/users/marwa/models"
     policy_prng = jax.random.PRNGKey(0)
-    def evaluate(inference: GPT2MCInference):
+    def evaluator(inference: GPT2InferenceMask):
         nonlocal policy_prng
         policy_prng, new_key = jax.random.split(policy_prng)
-        policy = GPT2ValuePolicy(
+        policy = GPT2PPOPolicy(
             inference=inference, 
             prng_key=new_key, 
             generation_config=GenerationConfig(
@@ -302,38 +282,35 @@ def main(
             out_str_process=lambda x: x.removesuffix('\n')+'\n', 
         )
 
-        loss_results = eval_loss(
+        loss_metrics = eval_loss(
             inference=inference, 
-            dataset=eval_dataset, 
+            dataset=eval_data, 
             prng_key=None, 
             bsize=eval_loss_bsize, 
             eval_batches=eval_loss_batches, 
         )
 
-        interaction_raw_results, interaction_summary_results = text_env_eval(
+        interation_raw_results, interaction_summary_results = text_env_eval(
             env=env, 
             policy=policy, 
             n_rollouts=policy_n_rollouts, 
             bsize=policy_bsize, 
         )
 
-        for item in interaction_raw_results:
+        for item in interation_raw_results:
             print('='*25)
             print(text_history_to_str(item[-1].post_transition_history))
             print('='*25)
 
-        logs = pull_logs(interaction_summary_results)
-        log(logs, use_wandb and is_main_process)
+        return loss_metrics['loss'], {'loss_metrics': loss_metrics, 'generation_metrics': interaction_summary_results}
 
-        return loss_results['losses']['total_loss'], {'interaction': logs, 'loss': loss_results}
-    
     train_prng = jax.random.PRNGKey(1)
     save_dtype = jnp.bfloat16 if save_bf16 else jnp.float32
     trainer, inference = train_loop(
-        trainer=train, 
+        trainer=trainer, 
         inference=inference, 
-        evaluator=evaluate, 
-        dataset=train_dataset, 
+        evaluator=evaluator, 
+        dataset=train_data, 
         prng_key=train_prng, 
         save_dir=save_dir, 
         epochs=epochs, 
@@ -359,6 +336,5 @@ def main(
         is_main_process=is_main_process, 
         **loop_state, 
     )
-
 if __name__ == "__main__":
     tyro.cli(main)

@@ -25,6 +25,7 @@ from environments.car_dealer.data import create_trajectories_from_conversations,
 import tree
 import json
 from algorithms.jax_ilql.basic_train_loop import eval_loop, train_loop
+from utils.gcs_manager import open_pp as open
 
 
 def main(
@@ -97,7 +98,7 @@ def main(
     input_args = locals().copy()
     print(input_args)
 
-    from utils.gcs_manager import open_pp as open
+    
     open = partial(open, gcloud_project=gcloud_project, gcloud_token=gcloud_token)
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
