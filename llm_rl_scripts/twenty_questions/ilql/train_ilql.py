@@ -374,9 +374,7 @@ def main(
         ), 
         loss_fn=loss_fn, 
     )
-
     oracle_prng = jax.random.PRNGKey(7)
-
     env = TwentyQuestionsPolicyEnvironment(
         oracle=T5Oracle.load_oracle(
             mesh=mesh,

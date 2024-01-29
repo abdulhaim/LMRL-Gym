@@ -103,7 +103,14 @@ def main(
 
     should_restore_loop_state: bool=False, 
 ):
-
+    def convert_trajectory_to_masked_text(trajectories):
+        for trajectory in trajectories:
+            text_history = trajectory.text_history
+            lst = []
+            for text in text_history:
+                item = (text.text, text.is_action)
+                lst.append(item)
+            yield lst
     
     nltk.download('punkt')
     nltk.download('averaged_perceptron_tagger')
@@ -111,7 +118,7 @@ def main(
 
     print(input_args)
     print(type(input_args))
-    # embed()
+ 
 
     tokenizer = AutoTokenizer.from_pretrained('gpt2')
     tokenizer.add_special_tokens({'pad_token': '<|pad|>'})

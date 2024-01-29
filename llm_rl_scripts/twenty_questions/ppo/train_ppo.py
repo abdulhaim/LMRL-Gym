@@ -44,7 +44,6 @@ def main(
     model_load_mode: ModelLoadMode, 
     model_load_path: str, 
     bc_data_path: str, 
-    # vocab_file: str, 
     oracle_model_mode: T5OracleModelLoadMode,
     oracle_model_path: str,
 
@@ -210,11 +209,6 @@ def main(
         model=policy_model, 
         tokenizer=tokenizer, 
     )
-
-    # vocab = Vocabulary.from_file(
-    #     vocab_file=vocab_file, 
-    #     fill_cache=False, 
-    # )
 
     oracle_prng = jax.random.PRNGKey(7)
     env = TwentyQuestionsPolicyEnvironment(
