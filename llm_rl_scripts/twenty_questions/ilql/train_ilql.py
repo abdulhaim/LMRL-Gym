@@ -20,7 +20,7 @@ from LLM_RL.algorithms.value_rl_base.gpt2.interface import GPT2ValuePolicy, GPT2
 from LLM_RL.heads.mlp_head import load_train_state_from_config as load_head_train_state_from_config
 from LLM_RL.heads.mlp_head import MLPHeadConfig
 from JaxSeq.shard_model import shard_params_from_params
-from LLM_RL.algorithms.ilql.data import ILQLIterableDataset
+from LLM_RL.algorithms.ilql.data import ILQLIterableDataset, ILQLDataset
 from functools import partial
 from JaxSeq.logs import log, pull_logs
 from LLM_RL.algorithms.ilql.train import train_loop, eval_loss
@@ -30,15 +30,18 @@ from JaxSeq.utils import multihost_device_get
 from llm_rl_scripts.twenty_questions.env.env import TwentyQuestionsPolicyEnvironment
 from llm_rl_scripts.twenty_questions.env.oracle import T5Oracle
 from llm_rl_scripts.twenty_questions.env.oracle import T5ModelLoadMode as T5OracleModelLoadMode
-from llm_rl_scripts.twenty_questions.env.data import get_default_word_list, create_conversation_from_history
+from llm_rl_scripts.twenty_questions.env.data import create_trajectories_from_conversations, get_default_word_list, create_conversation_from_history
 
 from jax.sharding import PartitionSpec as PS
+from IPython import embed
+import nltk
+import json
 
 def main(
     model_load_mode: ModelLoadMode, 
     model_load_path: str, 
     train_data_path: str, 
-    eval_data_path: str,
+    eval_data_path: str, 
     oracle_model_path: str,
 
     /,  # Mark the end of positional arguments.
@@ -91,7 +94,7 @@ def main(
     policy_top_p: Optional[float]=None, 
     policy_top_k: Optional[int]=None, 
 
-    policy_bsize: int=32, 
+    policy_bsize: int=2, 
     policy_n_rollouts: int=32, 
 
     eval_loss_bsize: int=32, 
@@ -126,20 +129,24 @@ def main(
     print(f"Mesh: {mesh}")
     print(f"Is main process: {is_main_process}")
 
-    def map_data_item(item):
-        text_trajectory_chain = TextTrajectoryChain(
-            text_trajectory=TextTrajectory(
-                text_history=[Text(text, bool(is_action)) for text, is_action in item['sequence']], 
-                reward=[0.0]+item['reward'], 
-                done=item['done'], 
-            ), 
-            next=None, 
-        )
-        token_trajectory_chain = TokenTrajectoryChain.from_text_trajectory_chain(text_trajectory_chain, tokenizer)
-        return ILQLData.from_token_trajectory_chain(token_trajectory_chain)
+     # load data
+    with open(convert_path(train_data_path), 'r') as f:
+        raw_train = json.load(f)
+    with open(convert_path(eval_data_path), 'r') as f:
+        raw_eval = json.load(f)
+
+    train_text_trajectories = create_trajectories_from_conversations(raw_train)
+    eval_text_trajectories = create_trajectories_from_conversations(raw_eval)
+
+    def ilql_data_generator(trajectories):
+        for trajectory in trajectories:
+            trajectory_chain = TextTrajectoryChain(text_trajectory=trajectory, 
+                                                   next=None,)
+            token_trajectory = TokenTrajectoryChain.from_text_trajectory_chain(trajectory_chain, tokenizer)
+            yield ILQLData.from_token_trajectory_chain(token_trajectory)
 
     train_dataset = ILQLIterableDataset.from_ilql_data_iterable(
-        MapIterable(map_data_item, FileOpenIterable(convert_path(train_data_path), 'r', pipe=jsonl_stream)), 
+        ilql_data_generator(train_text_trajectories), 
         tokenizer, 
         BlockingStrategy(
             padding=Padding.RIGHT, 
@@ -149,7 +156,7 @@ def main(
     )
 
     eval_dataset = ILQLIterableDataset.from_ilql_data_iterable(
-        MapIterable(map_data_item, FileOpenIterable(convert_path(eval_data_path), 'r', pipe=jsonl_stream)), 
+        ilql_data_generator(eval_text_trajectories), 
         tokenizer, 
         BlockingStrategy(
             padding=Padding.RIGHT, 
@@ -367,13 +374,12 @@ def main(
         ), 
         loss_fn=loss_fn, 
     )
-    
     oracle_prng = jax.random.PRNGKey(7)
     env = TwentyQuestionsPolicyEnvironment(
         oracle=T5Oracle.load_oracle(
             mesh=mesh,
             prng_key=oracle_prng,
-            model_load_mode=oracle_model_mode,
+            model_load_mode=T5OracleModelLoadMode.PARAMS,
             model_load_path=oracle_model_path,
             use_fp16_activations=False,
             use_fp16_params=False,

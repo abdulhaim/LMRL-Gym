@@ -30,7 +30,6 @@ from JaxSeq.utils import multihost_device_get
 from transformers import GPT2TokenizerFast
 from IPython import embed
 from llm_rl_scripts.chess.env.env import text_env_eval_chess_positions
-import random 
 
 def main(
     model_load_mode: ModelLoadMode, 

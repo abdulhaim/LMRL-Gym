@@ -92,7 +92,7 @@ class T5Oracle(GuessCityOracle):
             model_dtype=model_dtype,
             tokenizer=tokenizer,
             mesh=mesh,
-            fsdp=fsdp,
+            # fsdp=fsdp,
             params_dtype=params_dtype,
         )
 
