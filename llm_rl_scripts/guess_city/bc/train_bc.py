@@ -304,4 +304,4 @@ def main(
         **loop_state, 
     )
 if __name__ == "__main__":
-    dcargs.cli(main)
+    tyro.cli(main)

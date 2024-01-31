@@ -16,7 +16,7 @@ import numpy as np
 from jax.experimental.maps import Mesh
 import optax
 from dataclasses import dataclass
-import dcargs
+import tyro
 from functools import partial
 from text_env_eval import text_env_eval
 from token_history import text_history_to_token_history, text_transition_to_token_transition
@@ -201,4 +201,4 @@ def main(
             pkl.dump(eval_token_transitions, f)
 
 if __name__ == "__main__":
-    dcargs.cli(main)
+    tyro.cli(main)

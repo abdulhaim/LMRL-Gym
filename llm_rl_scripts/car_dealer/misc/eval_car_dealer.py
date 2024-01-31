@@ -14,7 +14,7 @@ from jax_models.gpt2 import load_gpt2_model
 from jax_models.t5 import load_t5_model
 import numpy as np
 from jax.experimental.maps import Mesh
-import dcargs
+import tyro
 from functools import partial
 from utils.path import convert_path
 from utils.randomness import seed_generator
@@ -609,4 +609,4 @@ def main(
 
 
 if __name__ == "__main__":
-    dcargs.cli(main)
+    tyro.cli(main)

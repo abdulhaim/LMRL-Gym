@@ -11,7 +11,7 @@ from jax_models.gpt2 import load_gpt2_model
 import numpy as np
 from jax.experimental.maps import Mesh
 import optax
-import dcargs
+import tyro
 from functools import partial
 from token_history import PrefixTokenTrajectory
 from utils.path import convert_path
@@ -357,4 +357,4 @@ def main(
         )
 
 if __name__ == "__main__":
-    dcargs.cli(main)
+    tyro.cli(main)
