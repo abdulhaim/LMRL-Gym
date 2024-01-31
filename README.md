@@ -74,8 +74,8 @@ In the subfolder for each task, you can find a README detailing how to run each 
 ### **1. Pull from GitHub**
 
 ``` bash
-git clone https://github.com/Sea-Snell/LLM_RL.git
-cd LLM_RL
+git clone https://github.com/abdulhaim/LMRL-Gym
+cd LMRL-Gym
 ```
 
 ### **2. Install dependencies**
@@ -95,7 +95,7 @@ python -m pip install -e .
 conda env create -f environment.yml
 conda activate LLM_RL
 python -m pip install --upgrade pip
-conda install jaxlib=*=*cuda* jax cuda-nvcc -c conda-forge -c nvidia
+conda install 'jaxlib=*=*cuda*' jax cuda-nvcc -c conda-forge -c nvidia
 python -m pip install -e .
 ```
 
