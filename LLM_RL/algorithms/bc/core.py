@@ -14,8 +14,8 @@ from flax.core.frozen_dict import FrozenDict
 import optax
 from jaxtyping import PyTree
 from transformers.modeling_flax_utils import FlaxPreTrainedModel
-from environment import TextHistory, TokenHistory
-from jax_utils.data import block_sequences
+from LLM_RL.environment import TextHistory, TokenHistory
+from JaxSeq.utils import block_sequences
 from LLM_RL.algorithms.bc.data import block_token_histories
 from transformers.tokenization_utils import PreTrainedTokenizer
 from jax.experimental.pjit import pjit, with_sharding_constraint

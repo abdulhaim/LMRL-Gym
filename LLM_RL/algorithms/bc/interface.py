@@ -3,13 +3,10 @@ from collections import namedtuple
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import jax
-from jax_utils.shard_utils import set_partitions, _id_fn
-from flax.core.frozen_dict import freeze
 import jax.numpy as jnp
 from flax.core.frozen_dict import freeze, unfreeze
 from jax.experimental.maps import Mesh
 import numpy as np
-from jax_utils.multihost_shard_utils import host_param_shard
 from jax.random import KeyArray
 from optax import softmax_cross_entropy_with_integer_labels
 from flax.core.frozen_dict import FrozenDict
@@ -18,7 +15,7 @@ from jaxtyping import PyTree
 from transformers.modeling_flax_utils import FlaxPreTrainedModel
 from environment import TextHistory, TokenHistory
 from algorithms.jax_agent import Inference, StepOutput, Trainer
-from jax_utils.data import block_sequences
+from JaxSeq.utils import block_sequences
 from LLM_RL.algorithms.bc.data import block_token_histories
 # from token_history import text_history_to_token_history
 from transformers.tokenization_utils import PreTrainedTokenizer
