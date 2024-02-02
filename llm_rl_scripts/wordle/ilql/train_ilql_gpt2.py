@@ -49,10 +49,10 @@ def main(
     use_wandb: bool=False, 
     wandb_project: Optional[str]=None, 
 
-    epochs: int=1, 
+    epochs: int=10, 
     max_steps: Optional[int]=None, 
     
-    lr: float=1e-5, 
+    lr: float=3e-5, 
     weight_decay: float=0.0, 
 
     train_bsize: int=32, 
@@ -97,7 +97,7 @@ def main(
 
     should_restore_loop_state: bool=False, 
 
-    beta: float=16.0, 
+    beta: float=32.0, 
 
     detach_q1: bool=False, 
     detach_q2: bool=False, 
@@ -378,6 +378,7 @@ def main(
 
     policy_prng = jax.random.PRNGKey(0)
     def evaluate(inference: GPT2ILQLInference):
+        print("Evaluating...")
         nonlocal policy_prng
         policy_prng, new_key = jax.random.split(policy_prng)
         policy = GPT2ValuePolicy(
@@ -409,12 +410,15 @@ def main(
             eval_batches=eval_loss_batches, 
         )
 
+        print(loss_results)
+
         interaction_raw_results, interaction_summary_results = text_env_eval(
             env=env, 
             policy=policy, 
             n_rollouts=policy_n_rollouts, 
             bsize=policy_bsize, 
         )
+        print(len(interaction_raw_results))
 
         for item in interaction_raw_results:
             print('='*25)

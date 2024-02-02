@@ -1,7 +1,7 @@
 from typing import Any, Callable, Generator, Iterator, List, Optional, Tuple, Union
-from token_history import TokenHistory
+from LLM_RL.environment import TokenHistory
 import numpy as np
-from jax_utils.data import Dataset, IterableDataset, block_sequences
+from  import Dataset, IterableDataset, block_sequences
 import jax.numpy as jnp
 
 # pad token histories

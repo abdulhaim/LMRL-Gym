@@ -27,14 +27,14 @@ from LLM_RL.algorithms.mc_returns.gpt2.interface import GPT2MCTrain, GPT2MCInfer
 from llm_rl_scripts.twenty_questions.env.env import TwentyQuestionsPolicyEnvironment
 from llm_rl_scripts.twenty_questions.env.oracle import T5Oracle
 from llm_rl_scripts.twenty_questions.env.oracle import T5ModelLoadMode as T5OracleModelLoadMode
-from llm_rl_scripts.twenty_questions.env.data import get_default_word_list, create_conversation_from_history 
-
+from llm_rl_scripts.twenty_questions.env.data import create_trajectories_from_conversations, get_default_word_list, create_conversation_from_history 
+import json
 
 def main(
     model_load_mode: ModelLoadMode, 
     model_load_path: str, 
     train_data_path: str, 
-    eval_data_path: str,
+    eval_data_path: str, 
     oracle_model_path: str,
 
     /,  # Mark the end of positional arguments.
@@ -105,7 +105,11 @@ def main(
     policy_temperature: Optional[float]=None, 
     policy_top_p: Optional[float]=None, 
     policy_top_k: Optional[int]=None, 
+    policy_bsize: int=2, 
+    policy_n_rollouts: int=32, 
 
+    eval_loss_bsize: int=32, 
+    eval_loss_batches: Optional[int]=None, 
     force_pad_embeddings: bool=False, 
 
     should_restore_loop_state: bool=False, 
@@ -122,21 +126,25 @@ def main(
     is_main_process = jax.process_index() == 0
     print(f"Mesh: {mesh}")
     print(f"Is main process: {is_main_process}")
+    
+    # load data
+    with open(convert_path(train_data_path), 'r') as f:
+        raw_train = json.load(f)
+    with open(convert_path(eval_data_path), 'r') as f:
+        raw_eval = json.load(f)
 
-    def map_data_item(item):
-        text_trajectory_chain = TextTrajectoryChain(
-            text_trajectory=TextTrajectory(
-                text_history=[Text(text, bool(is_action)) for text, is_action in item['sequence']], 
-                reward=[0.0]+item['reward'], 
-                done=item['done'], 
-            ), 
-            next=None, 
-        )
-        token_trajectory_chain = TokenTrajectoryChain.from_text_trajectory_chain(text_trajectory_chain, tokenizer)
-        return MCData.from_token_trajectory_chain(token_trajectory_chain, gamma=gamma)
+    train_text_trajectories = create_trajectories_from_conversations(raw_train)
+    eval_text_trajectories = create_trajectories_from_conversations(raw_eval)
+
+    def mc_data_generator(trajectories):
+        for trajectory in trajectories:
+            trajectory_chain = TextTrajectoryChain(text_trajectory=trajectory, 
+                                                   next=None,)
+            token_trajectory = TokenTrajectoryChain.from_text_trajectory_chain(trajectory_chain, tokenizer)
+            yield MCData.from_token_trajectory_chain(token_trajectory, gamma=gamma)
 
     train_dataset = MCIterableDataset.from_mc_data_iterable(
-        MapIterable(map_data_item, FileOpenIterable(convert_path(train_data_path), 'r', pipe=jsonl_stream)), 
+        mc_data_generator(train_text_trajectories),
         tokenizer, 
         BlockingStrategy(
             padding=Padding.RIGHT, 
@@ -146,7 +154,7 @@ def main(
     )
 
     eval_dataset = MCIterableDataset.from_mc_data_iterable(
-        MapIterable(map_data_item, FileOpenIterable(convert_path(eval_data_path), 'r', pipe=jsonl_stream)), 
+        mc_data_generator(eval_text_trajectories),
         tokenizer, 
         BlockingStrategy(
             padding=Padding.RIGHT, 
@@ -259,7 +267,7 @@ def main(
     
     model_prng_key = jax.random.PRNGKey(2)
     policy_prng, oracle_prng = jax.random.split(model_prng_key)
-    oracle_model_path = "gs://rail-tpus-charles-3/JaxSeq/outputs/twenty_questions/flan-t5-xl_convos_0_1000_noprompt_lr1e-3_test1"
+    # oracle_model_path = "gs://rail-tpus-charles-3/JaxSeq/outputs/twenty_questions/flan-t5-xl_convos_0_1000_noprompt_lr1e-3_test1"
 
     env = TwentyQuestionsPolicyEnvironment(
         oracle=T5Oracle.load_oracle(

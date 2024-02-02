@@ -3,33 +3,47 @@ from typing import Any, Dict, List, Optional
 import jax
 from JaxSeq.models.gpt2.interface import GPT2TrainMask, GPT2InferenceMask
 from JaxSeq.optimizers import GPT3Optimizer
-from jax_models.gpt2 import load_gpt2_model
+from LLM_RL.algorithms.ppo.gpt2.interface import GPT2PPOPolicy
+from JaxSeq.utils import convert_path, load_mesh, setup_experiment_save, MapIterable, BlockingStrategy, Padding, Truncation
+from JaxSeq.utils import get_weight_decay_mask
+from JaxSeq.models.gpt2.load import load_train_state, ModelLoadMode, load_params
 import numpy as np
 from jax.experimental.maps import Mesh
 import optax
-import dcargs
+import tyro
 from functools import partial
-from text_env_eval import text_env_eval
-from token_history import text_history_to_token_history, text_transition_to_token_transition
-from utils.path import convert_path
+from LLM_RL.environment import text_env_eval
+from llm_rl_scripts.car_dealer.env.policies import text_history_to_str
+from LLM_RL.environment import TokenHistory
+from JaxSeq.utils import convert_path
 import os
 import pickle as pkl
 import json
-from LLM_RL.algorithms.jax_bc.core import bc_loss, load_bc_inference, load_bc_trainer
+from LLM_RL.algorithms.bc.core import bc_loss, load_bc_inference, load_bc_trainer
 import pickle as pkl
-from LLM_RL.algorithms.jax_bc.data import BCDataset, filter_generator, filter_items
-from LLM_RL.algorithms.jax_bc.basic_train_loop import train_loop, eval_loop
-from LLM_RL.environments.car_dealer.data import create_trajectories_from_conversations, Role
+from LLM_RL.algorithms.bc.data import BCDataset, filter_generator, filter_items
+from LLM_RL.algorithms.bc.basic_train_loop import train_loop, eval_loop
+from llm_rl_scripts.car_dealer.env.data import create_trajectories_from_conversations, Role
+from llm_rl_scripts.car_dealer.env.env import BatchedCarDealerPolicyEnvironment
+from llm_rl_scripts.car_dealer.env.buyer import BatchedGPT2BuyerPolicy
 import tree
 from transformers import AutoTokenizer
+from JaxSeq.bucket_manager import open_with_bucket as open
+from transformers import GenerationConfig
+import jax.numpy as jnp
+from jaxtyping import PyTree
+import re
 
 def main(
-    exp_name: Optional[str], 
+    model_load_mode: ModelLoadMode, 
     model_name: str, 
+    buyer_model_path: str,
 
     /,  # Mark the end of positional arguments.
 
+    exp_name: Optional[str], 
     role: Role=Role.SELLER, 
+    outputs_path: str="outputs/", 
 
     top_p: Optional[float]=None, 
 
@@ -37,32 +51,70 @@ def main(
     checkpoint_is_sharded: bool=True, 
 
     data_path: Optional[str]='data/car_dealer', 
-    output_path: Optional[str]='outputs/car_dealer', 
 
     use_wandb: bool=False, 
     wandb_project: Optional[str]='car-dealer-bc', 
 
     do_pjit: bool=True, 
-    model_p_shape: int=1, 
-    data_p_shape: int=1, 
+
+    data_mesh_shape: int=1, 
+    fsdp_mesh_shape: int=1, 
+    model_mesh_shape: int=-1, 
+
 
     epochs: int=2, 
     max_steps: Optional[int]=None, 
     eval_batches: Optional[int]=None, 
     
     use_adafactor: bool=False,
-    lr: float=1e-5,
-    use_lr_schedule: bool=False,
-    peak_lr: float=5e-5, 
-    end_lr: float=6e-5, 
+
+    init_lr: float=0.0,
+    end_lr: float=0.0001,
+    lr: float=0.0001,
+    lr_warmup_steps: int=1,
+    lr_decay_steps: int=2, # no decay, so just needs to be > warmup steps
+    bf16_momentum: bool=False, 
+    multiply_by_parameter_scale: bool=True,
+
+
     weight_decay: float=0.0, 
 
     train_bsize: int=32, 
-    grad_accum_steps: int=1, 
+    grad_accum_steps: int=4, 
+
+    policy_bsize: int=1, 
 
     gradient_checkpoint: bool=True, 
 
     max_sequence_length: int=1024, 
+
+    policy_do_sample: bool=False,
+    policy_num_beams: int=1,
+    policy_temperature: float=1.0,
+    policy_top_p: float=1.0,
+    policy_top_k: int=0,
+    policy_max_output_length: int=1024,
+    policy_max_input_length: int=1024,
+
+    bf16_activations: bool=False,
+
+    policy_n_rollouts: int=1, 
+
+    eval_every_steps: Optional[int]=256, 
+    eval_every_epochs: Optional[int]=None, 
+    eval_at_beginning: bool=False, 
+    eval_at_end: bool=True, 
+    
+    save_every_steps: Optional[int]=None, 
+    save_every_epochs: Optional[int]=None, 
+    save_at_beginning: bool=False, 
+    save_at_end: bool=False, 
+    save_best: bool=True, 
+    max_checkpoints: Optional[int]=None, 
+    save_train_state: bool=True, 
+    save_bf16: bool=True, 
+
+    force_pad_embeddings: bool=False, 
 
     log_every: Optional[int]=None, 
     num_logs_per_epoch: int=10,
@@ -70,12 +122,12 @@ def main(
     num_evals_per_epoch: int=5, 
     save_every: Optional[int]=None, 
     num_saves_per_epoch: int=1,
-    save_best: bool=False,
     save_best_also: bool=False,
     save_last: bool=False,
 
     inference_bsize: int=32, 
     seed: int=0,
+    should_restore_loop_state: bool=False,
 
     gcloud_project: Optional[str]=None, 
     gcloud_token: Optional[str]=None, 
@@ -88,7 +140,9 @@ def main(
     input_args = locals().copy()
     print(input_args)
 
-    from utils.gcs_manager import open_pp as open
+    is_main_process = jax.process_index() == 0
+    mesh = load_mesh((data_mesh_shape, fsdp_mesh_shape, model_mesh_shape), ('dp', 'fsdp', 'mp'))
+    
     open = partial(open, gcloud_project=gcloud_project, gcloud_token=gcloud_token)
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -117,8 +171,8 @@ def main(
     train_text_histories = [trajectory.text_history for trajectory in train_text_trajectories]
     eval_text_histories = [trajectory.text_history  for trajectory in eval_text_trajectories]
 
-    train_token_histories = [text_history_to_token_history(text_history, tokenizer) for text_history in train_text_histories]
-    eval_token_histories = [text_history_to_token_history(text_history, tokenizer) for text_history in eval_text_histories]
+    train_token_histories = [TokenHistory.from_text_history(text_history, tokenizer) for text_history in train_text_histories]
+    eval_token_histories = [TokenHistory.from_text_history(text_history, tokenizer) for text_history in eval_text_histories]
     
     train_token_histories = [token_history for token_history in train_token_histories if token_history.tokens.shape[0] <= max_sequence_length]
     eval_token_histories = [token_history for token_history in eval_token_histories if token_history.tokens.shape[0] <= max_sequence_length]
@@ -143,16 +197,16 @@ def main(
     
     if model_name == 'gpt2-xl' or model_name == 'gpt2-medium':
         print("loading model")
-        model, params, shard_rules = load_gpt2_model(
-            model_str=model_name, 
-            from_pretrained=True, 
-            checkpoint_path=checkpoint_path, 
-            use_fp16=jax.default_backend() == 'tpu', 
+        train_state, model = load_train_state(
+            model_load_mode=model_load_mode, 
+            model_load_path=convert_path(model_name) if model_load_mode != ModelLoadMode.HF else model_name, 
+            model_dtype=jnp.bfloat16 if bf16_activations else jnp.float32, 
+            optim_getter=optim_getter, 
             tokenizer=tokenizer, 
-            gradient_checkpoint=gradient_checkpoint, 
-            seed=0, 
-            gcloud_project=gcloud_project, 
-            gcloud_token=gcloud_token, 
+            mesh=mesh, 
+            prng_key=model_prng_key, 
+            force_pad_embeddings=force_pad_embeddings, 
+            params_dtype=jnp.float32, 
         )
     else:
         raise NotImplementedError
@@ -186,7 +240,7 @@ def main(
     model_prng_key = jax.random.PRNGKey(2)
     train_state, model = load_train_state(
         model_load_mode=model_load_mode, 
-        model_load_path=convert_path(model_load_path) if model_load_mode != ModelLoadMode.HF else model_load_path, 
+        model_load_path=convert_path(model_name) if model_load_mode != ModelLoadMode.HF else model_name, 
         model_dtype=jnp.bfloat16 if bf16_activations else jnp.float32, 
         optim_getter=optim_getter, 
         tokenizer=tokenizer, 
@@ -195,18 +249,18 @@ def main(
         force_pad_embeddings=force_pad_embeddings, 
         params_dtype=jnp.float32, 
     )
-    model.config.gradient_checkpointing = gradient_checkpointing
-    model.config.gradient_checkpointing_policy = gradient_checkpointing_policy
-    model.config.resid_pdrop = resid_pdrop
-    model.config.embd_pdrop = embd_pdrop
-    model.config.attn_pdrop = attn_pdrop
+    # model.config.gradient_checkpointing = gradient_checkpointing
+    # model.config.gradient_checkpointing_policy = gradient_checkpointing_policy
+    # model.config.resid_pdrop = resid_pdrop
+    # model.config.embd_pdrop = embd_pdrop
+    # model.config.attn_pdrop = attn_pdrop
 
-    loop_state = dict()
-    if should_restore_loop_state and (model_load_mode in {ModelLoadMode.TRAIN_STATE, 
-                                                          ModelLoadMode.TRAIN_STATE_PARAMS, 
-                                                          ModelLoadMode.PARAMS}):
-        with open(os.path.join(convert_path(model_load_path), 'loop_state.pkl'), 'rb') as f:
-            loop_state = pkl.load(f)
+    # loop_state = dict()
+    # if should_restore_loop_state and (model_load_mode in {ModelLoadMode.TRAIN_STATE, 
+    #                                                       ModelLoadMode.TRAIN_STATE_PARAMS, 
+    #                                                       ModelLoadMode.PARAMS}):
+    #     with open(os.path.join(convert_path(model_load_path), 'loop_state.pkl'), 'rb') as f:
+    #         loop_state = pkl.load(f)
 
     print("loading trainer and inference")    
     trainer = GPT2TrainMask.load_train(
@@ -230,6 +284,25 @@ def main(
     )
     
     policy_prng = jax.random.PRNGKey(0)
+    print("load environment")
+    prng_key = jax.random.PRNGKey(3)
+    prng_key, buyer_inference_prng, buyer_policy_prng = jax.random.split(prng_key, 3)
+    buyer_model_mode = ModelLoadMode.PARAMS
+    buyer_params, buyer_model = load_params(
+        model_load_mode=buyer_model_mode, 
+        model_load_path=convert_path(buyer_model_path) if model_load_mode != ModelLoadMode.HF else buyer_model_path, 
+        model_dtype=jnp.bfloat16 if bf16_activations else jnp.float32, 
+        tokenizer=tokenizer, 
+        mesh=mesh, 
+        prng_key=buyer_inference_prng, 
+        force_pad_embeddings=force_pad_embeddings, 
+        params_dtype=jnp.float32, 
+    )
+
+    env = BatchedCarDealerPolicyEnvironment(
+        buyer=buyer_model, 
+        bsize=8,
+    )
 
     def evaluator(inference: GPT2InferenceMask):
         nonlocal policy_prng
@@ -255,14 +328,15 @@ def main(
             out_str_process=lambda x: x.removesuffix('\n')+'\n', 
         )
 
-        loss_metrics = eval_loss(
+        data_results = eval_loop(
             inference=inference, 
             dataset=eval_data, 
-            prng_key=None, 
-            bsize=eval_loss_bsize, 
-            eval_batches=eval_loss_batches, 
+            rng=jax.random.PRNGKey(1), 
+            bsize=32, 
+            prefetch_batches=None, 
+            eval_batches=16, 
         )
-
+        
         interation_raw_results, interaction_summary_results = text_env_eval(
             env=env, 
             policy=policy, 
@@ -275,7 +349,7 @@ def main(
             print(text_history_to_str(item[-1].post_transition_history))
             print('='*25)
 
-        return loss_metrics['loss'], {'loss_metrics': loss_metrics, 'generation_metrics': interaction_summary_results}
+        return data_results['loss'], {'loss_metrics': data_results, 'generation_metrics': interaction_summary_results}
     
     train_prng = jax.random.PRNGKey(1)
     save_dtype = jnp.bfloat16 if save_bf16 else jnp.float32
@@ -284,31 +358,22 @@ def main(
         inference=inference, 
         evaluator=evaluator, 
         dataset=train_data, 
-        prng_key=train_prng, 
+        rng=train_prng, 
         save_dir=save_dir, 
         epochs=epochs, 
         max_steps=max_steps, 
         bsize=train_bsize, 
         log_every=log_every, 
-        eval_every_steps=eval_every_steps, 
-        eval_every_epochs=eval_every_epochs, 
-        eval_at_beginning=eval_at_beginning, 
-        eval_at_end=eval_at_end, 
-        save_every_steps=save_every_steps, 
-        save_every_epochs=save_every_epochs, 
-        save_at_beginning=save_at_beginning, 
+        eval_every=eval_every_steps,  
+        eval_at_beginning=eval_at_beginning,  
+        save_every=save_every_steps,  
         save_at_end=save_at_end, 
-        save_best=save_best, 
-        max_checkpoints=max_checkpoints, 
-        save_train_state=save_train_state, 
-        save_dtype=save_dtype, 
+        save_best=save_best,  
         use_wandb=use_wandb, 
         wandb_project=wandb_project, 
         wandb_run_name=exp_name, 
-        wandb_config=None, 
-        is_main_process=is_main_process, 
-        **loop_state, 
+        wandb_config=None,  
     )
 
 if __name__ == "__main__":
-    dcargs.cli(main)
+    tyro.cli(main)

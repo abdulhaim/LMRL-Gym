@@ -1,6 +1,8 @@
+from functools import partial
 from typing import Optional
 from IPython import embed
 import tyro
+from LLM_RL.algorithms.bc.data import BCDataset, BCIterableDataset
 from JaxSeq.utils import convert_path, load_mesh, setup_experiment_save, MapIterable, BlockingStrategy, Padding, Truncation
 import jax
 import jax.numpy as jnp
@@ -19,7 +21,9 @@ from transformers.generation import GenerationConfig
 import json
 from transformers import AutoTokenizer
 from JaxSeq.bucket_manager import open_with_bucket as open
+from LLM_RL.algorithms.bc.interface import bc_loss, load_bc_inference, load_bc_trainer
 from LLM_RL.algorithms.ppo.gpt2.interface import GPT2PPOPolicy
+from LLM_RL.environment import TokenHistory
 from llm_rl_scripts.chess.env.env import preprocess_move, preprocess_state, text_env_eval_chess_positions
 from JaxSeq.logs import pull_logs
 from LLMRL_tasks.llm_rl.data import get_data
@@ -115,30 +119,30 @@ def main(
         for chain in chain_generator:
             curr_trajectory = chain.text_trajectory
             text_history = curr_trajectory.text_history
-            token_history = text_history_to_token_history(text_history, tokenizer)
+            token_history = TokenHistory.from_text_history(text_history, tokenizer)
             yield token_history
     
-    if epoch == 1:
+    if epochs == 1:
         train_data = BCIterableDataset(
-            token_generator=token_generator(str_iterable(train_chain_generator)),
+            token_generator=str_iterable(train_chain_generator),
             pad_token_id=tokenizer.pad_token_id,
             max_len=max_input_length + max_output_length,
         )
 
         eval_data = BCIterableDataset(
-            token_generator=token_generator(str_iterable(eval_chain_generator)),
+            token_generator=str_iterable(eval_chain_generator),
             pad_token_id=tokenizer.pad_token_id,
             max_len=max_input_length + max_output_length,
         )
     else:
         train_data = BCDataset(
-            token_histories=list(token_generator(str_iterable(train_chain_generator))),
+            token_histories=list(str_iterable(train_chain_generator)),
             pad_token_id=tokenizer.pad_token_id,
             max_len=max_input_length + max_output_length,
         )
 
         eval_data = BCDataset(
-            token_histories=list(token_generator(str_iterable(eval_chain_generator))),
+            token_histories=list(str_iterable(eval_chain_generator)),
             pad_token_id=tokenizer.pad_token_id,
             max_len=max_input_length + max_output_length,
         )
@@ -190,11 +194,14 @@ def main(
                                                           ModelLoadMode.PARAMS}):
         with open(os.path.join(convert_path(model_load_path), 'loop_state.pkl'), 'rb') as f:
             loop_state = pkl.load(f)
-    
+
+    loss_fn = partial(bc_loss, non_action_weight=0.0)
+
     trainer = GPT2Train.load_train(
         train_state=train_state, 
         model=model, 
         tokenizer=tokenizer, 
+        loss_fn=loss_fn,
     )
 
     inference = GPT2Inference.load_inference(

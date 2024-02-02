@@ -111,12 +111,15 @@ def main(
                 item = (text.text, text.is_action)
                 lst.append(item)
             yield lst
-
+    
     nltk.download('punkt')
     nltk.download('averaged_perceptron_tagger')
     input_args = dict(locals())
+
     print(input_args)
-    
+    print(type(input_args))
+ 
+
     tokenizer = AutoTokenizer.from_pretrained('gpt2')
     tokenizer.add_special_tokens({'pad_token': '<|pad|>'})
 
@@ -133,6 +136,18 @@ def main(
 
     train_text_trajectories = create_trajectories_from_conversations(raw_train)
     eval_text_trajectories = create_trajectories_from_conversations(raw_eval)
+
+    def convert_trajectory_to_masked_text(trajectories):
+        for trajectory in trajectories:
+            text_history = trajectory.text_history
+            lst = []
+            for text in text_history:
+                item = (text.text, text.is_action)
+                lst.append(item)
+            yield lst
+    
+    # train_text_histories = [convert_trajectory_to_masked_text(text_trajectory) for text_trajectory in train_text_trajectories]
+    # eval_text_histories = [convert_trajectory_to_masked_text(text_trajectory) for text_trajectory in eval_text_trajectories]
 
     train_data = MaskIterableDataset.blocked_from_str_segments_iterable(
         convert_trajectory_to_masked_text(train_text_trajectories), 
