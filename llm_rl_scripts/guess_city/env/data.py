@@ -60,7 +60,7 @@ def get_default_word_list() -> List[WordVariants]:
             city = city.capitalize()[1:]
             word_list.append(city + "," + country)
 
-    retun word_list
+    return word_list
 
 def create_trajectory_from_history(
     word_var: WordVariants, 
@@ -283,10 +283,6 @@ def asker_postproc(question: str) -> str:
 
     # typically many duplicate words
     if len(question.split(" ")) > 40:
-        return INVALID_QUESTION
-    
-    # non-questions
-    if question.split(" ")[0] not in ["Is", "Does", "Can", "Do", "Are", "Could"]:
         return INVALID_QUESTION
     
     # non-questions again

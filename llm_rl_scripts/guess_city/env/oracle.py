@@ -75,9 +75,8 @@ class T5Oracle(GuessCityOracle):
         model_load_mode: T5ModelLoadMode,
         model_load_path: str,
         tokenizer_name: str="google/flan-t5-xl",
-        use_fp16_activations: bool=True,
-        use_fp16_params: bool=True,
-        fsdp: bool=False,
+        use_fp16_activations: bool=False,
+        use_fp16_params: bool=False,
         max_input_length: int=124,
         max_output_length: int=4,
     ):
@@ -92,7 +91,6 @@ class T5Oracle(GuessCityOracle):
             model_dtype=model_dtype,
             tokenizer=tokenizer,
             mesh=mesh,
-            fsdp=fsdp,
             params_dtype=params_dtype,
         )
 
