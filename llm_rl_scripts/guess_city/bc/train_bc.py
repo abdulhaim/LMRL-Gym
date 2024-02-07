@@ -17,7 +17,7 @@ from transformers.generation import GenerationConfig
 from jaxtyping import PyTree
 import re
 from JaxSeq.optimizers import GPT3Optimizer
-from llm_rl_scripts.text_nav.env import TextNavEnv
+
 from LLM_RL.algorithms.ppo.gpt2.interface import GPT2PPOPolicy
 from LLM_RL.environment import text_history_to_str, text_env_eval
 
@@ -31,7 +31,6 @@ def main(
     model_load_path: str, 
     train_data_path: str, 
     eval_data_path: str, 
-    vocab_file: str, 
 
     /,  # Mark the end of positional arguments.
 
@@ -304,4 +303,4 @@ def main(
         **loop_state, 
     )
 if __name__ == "__main__":
-    dcargs.cli(main)
+    tyro.cli(main)
