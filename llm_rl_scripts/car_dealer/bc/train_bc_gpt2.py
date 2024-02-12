@@ -2,29 +2,28 @@ import jax
 from typing import Optional
 import tyro
 from JaxSeq.bucket_manager import open_with_bucket as open
-from transformers import AutoTokenizer
 from JaxSeq.utils import jsonl_stream, convert_path, load_mesh, setup_experiment_save
-import jax.numpy as jnp
+from JaxSeq.models.gpt2.interface import GPT2Inference
 from JaxSeq.utils import BlockingStrategy, Padding, Truncation, get_weight_decay_mask, MapIterable, FileOpenIterable
-import os
-import optax
 from JaxSeq.models.gpt2.interface import GPT2TrainMask, GPT2InferenceMask
 from JaxSeq.models.gpt2.load import load_train_state, ModelLoadMode, load_params
-import pickle as pkl
 from JaxSeq.data import MaskDataset, MaskIterableDataset
 from JaxSeq.train import eval_loss, train_loop
+from JaxSeq.optimizers import GPT3Optimizer
+from transformers import AutoTokenizer
+import jax.numpy as jnp
+import os
+import optax
+import pickle as pkl
 from transformers.generation import GenerationConfig
 from jaxtyping import PyTree
 import re
-from JaxSeq.optimizers import GPT3Optimizer
 from LLM_RL.algorithms.ppo.gpt2.interface import GPT2PPOPolicy
 from LLM_RL.environment import text_history_to_str, text_env_eval
 import json
-from llm_rl_scripts.car_dealer.env.env import BatchedCarDealerPolicyEnvironment 
-from llm_rl_scripts.twenty_questions.env.env import TwentyQuestionsPolicyEnvironment
-from llm_rl_scripts.twenty_questions.env.oracle import T5Oracle
-from llm_rl_scripts.twenty_questions.env.oracle import T5ModelLoadMode as T5OracleModelLoadMode
-from llm_rl_scripts.twenty_questions.env.data import create_trajectories_from_conversations, asker_postproc, asker_postproc_simple, asker_postproc_filter_repeats, get_default_word_list
+from llm_rl_scripts.car_dealer.env.buyer import BatchedGPT2BuyerPolicy
+from llm_rl_scripts.car_dealer.env.env import CarDealerPolicyEnvironment, BatchedCarDealerPolicyEnvironment
+from llm_rl_scripts.car_dealer.env.data import Role, create_trajectories_from_conversations
 from IPython import embed
 import nltk
 
@@ -70,7 +69,7 @@ def main(
 
     bf16_activations: bool=False, 
 
-    max_length: int=1024, 
+    max_length: int=512, 
 
     log_every: int=256, 
     eval_every_steps: Optional[int]=256, 
@@ -87,13 +86,13 @@ def main(
     save_train_state: bool=True, 
     save_bf16: bool=True, 
 
-    eval_loss_bsize: int=32, 
-    eval_loss_batches: Optional[int]=None, 
+    eval_loss_bsize: int=4, 
+    eval_loss_batches: Optional[int]=4, 
 
     policy_n_rollouts: int=32, 
     policy_bsize: int=1, 
     policy_max_input_length: int=256, 
-    policy_max_output_length: int=256, 
+    policy_max_output_length: int=128, 
     policy_do_sample: bool=True, 
     policy_num_beams: int=1, 
     policy_temperature: Optional[float]=None, 
@@ -127,12 +126,15 @@ def main(
     with open(convert_path(eval_data_path), 'r') as f:
         raw_eval = json.load(f)
 
-    train_text_trajectories = []
-    eval_text_trajectories = []
-    for personality, convos in raw_train.items():
-        train_text_trajectories.extend(create_trajectories_from_conversations(convos))
-    for personality, convos in raw_eval.items():
-        eval_text_trajectories.extend(create_trajectories_from_conversations(convos))
+    train_text_trajectories = create_trajectories_from_conversations(raw_train, role=Role.SELLER)
+    eval_text_trajectories = create_trajectories_from_conversations(raw_eval, role=Role.SELLER)
+
+    # train_text_trajectories = []
+    # eval_text_trajectories = []
+    # for convos in raw_train:
+    #     train_text_trajectories.extend(create_trajectories_from_conversations(convos, role=Role.SELLER))
+    # for convos in raw_eval:
+    #     eval_text_trajectories.extend(create_trajectories_from_conversations(convos, role=Role.SELLER))
 
     def convert_trajectory_to_masked_text(trajectories):
         for trajectory in trajectories:
@@ -170,7 +172,7 @@ def main(
     prng_key, oracle_inference_prng, buyer_policy_prng = jax.random.split(prng_key, 3)
     buyer_params, buyer_model = load_params(
         model_load_mode=ModelLoadMode.PARAMS, 
-        model_load_path=convert_path(oracle_model_path) if model_load_mode != ModelLoadMode.HF else buyer_model_path, 
+        model_load_path=convert_path(oracle_model_path) if model_load_mode != ModelLoadMode.HF else oracle_model_path, 
         model_dtype=jnp.bfloat16 if bf16_activations else jnp.float32, 
         tokenizer=tokenizer, 
         mesh=mesh, 
@@ -179,12 +181,39 @@ def main(
         params_dtype=jnp.float32, 
     )
 
+    buyer_inference = GPT2Inference.load_inference(
+        params=buyer_params,
+        model=buyer_model,
+        tokenizer=tokenizer,
+    )
+
+    buyer_policy = BatchedGPT2BuyerPolicy(
+        inference=buyer_inference, 
+        prng_key=buyer_policy_prng, 
+        generation_config=GenerationConfig(
+            do_sample=policy_do_sample, 
+            num_beams=policy_num_beams, 
+            temperature=policy_temperature, 
+            top_p=policy_top_p, 
+            top_k=policy_top_k, 
+            eos_token_id=tokenizer.encode('\n')[0], 
+            pad_token_id=tokenizer.pad_token_id, 
+            max_new_tokens=policy_max_output_length, 
+        ), 
+        blocking_strategy=BlockingStrategy(
+            padding=Padding.LEFT, 
+            truncation=Truncation.LEFT, 
+            max_length=policy_max_input_length, 
+        ), 
+        out_str_process=lambda x: x.removesuffix('\n')+'\n', 
+    )
+
     model_prng_key = jax.random.PRNGKey(2)
     policy_prng, oracle_prng = jax.random.split(model_prng_key)
 
     env = BatchedCarDealerPolicyEnvironment(
-        buyer=buyer_model, 
-        bsize=8,
+        buyer=buyer_policy,
+        buyer_bsize=policy_bsize, 
     )
 
     def optim_getter(params: PyTree):
@@ -256,7 +285,7 @@ def main(
         script__file__=__file__, 
         is_main_process=is_main_process, 
     )
-    save_dir = "/nfs/nfs1/users/marwa/models"
+
     policy_prng = jax.random.PRNGKey(0)
     def evaluator(inference: GPT2InferenceMask):
         nonlocal policy_prng

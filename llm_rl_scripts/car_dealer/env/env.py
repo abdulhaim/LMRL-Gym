@@ -97,8 +97,10 @@ class CarDealerPolicyEnvironment(TextEnv):
             "preferred_features": self.random.sample(DEFAULT_FEATURES, k=self.random.randint(1, 4)),
             "budget": self.random.choice(DEFAULT_BUDGETS)
         }
-
-        self.verbose = options.get("verbose", False)
+        if options is not None:
+            self.verbose = options.get("verbose", False)
+        else:
+            self.verbose = False
         if self.verbose:
             print("Env reset")
             print("buyer info:")
@@ -140,13 +142,13 @@ class BatchedCarDealerPolicyEnvironment(BatchedTextEnv):
         self.outputs: Optional[List[ConversationOutput]] = None
         self.verbose: bool = False
 
-    def step(self,  text_history_batch: List[Optional[TextHistory]], done_batch: Optional[List[bool]]=None) -> List[Optional[StepResult]]:
+    def step(self,  text_history_batch: List[Optional[TextHistory]], done: Optional[List[bool]]=None) -> List[Optional[StepResult]]:
         assert self.buyer_infos is not None, "call env.reset() first."
         assert len(text_history_batch) <= self.bsize, f"input batch size {len(text_history_batch)} is larger than buyer's batch size {self.bsize}"
 
         input_buyer_text_histories = [None for _ in range(self.bsize)]
         input_buyer_dones = [True for _ in range(self.bsize)]
-        for i, (buyer_info, text_history, done) in enumerate(zip(self.buyer_infos, text_history_batch, done_batch)):
+        for i, (buyer_info, text_history, done) in enumerate(zip(self.buyer_infos, text_history_batch, done)):
             if done:
                 continue
 
@@ -244,7 +246,6 @@ class BatchedCarDealerPolicyEnvironment(BatchedTextEnv):
         if seed_batch is None:
             seed_batch = [None for _ in range(self.bsize)]
 
-        print(self)
         self.outputs = [None for _ in range(len(seed_batch))]
 
         initial_text_history_batch: List[TextHistory] = []

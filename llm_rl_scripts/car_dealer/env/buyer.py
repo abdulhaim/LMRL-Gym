@@ -7,7 +7,7 @@ from JaxSeq.utils import BlockingStrategy, Padding, Truncation
 from JaxSeq.utils import strip_prompt_from_completion
 from transformers.generation import GenerationConfig
 from JaxSeq.models.gpt2.interface import GPT2Inference
-
+from IPython import embed
 
 class BatchedGPT2BuyerPolicy(BatchedTextPolicy):
     def __init__(
@@ -47,7 +47,12 @@ class BatchedGPT2BuyerPolicy(BatchedTextPolicy):
             eos_token = self.inference.tokenizer.pad_token
         if eos_token is None:
             eos_token = ''
+
+        # check if text_history is not a list of TextHistory
+        # if not all(isinstance(item, tuple) for item in text_history):
+        #     text_history = [text_history]
         
+        # embed()
         raw_input_strs = [
             eos_token if d else self.in_str_process(text_history_to_str(item)) \
                 for item, d in zip(text_history, done)
