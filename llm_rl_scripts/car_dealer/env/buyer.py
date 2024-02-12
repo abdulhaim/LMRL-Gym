@@ -49,8 +49,8 @@ class BatchedGPT2BuyerPolicy(BatchedTextPolicy):
             eos_token = ''
 
         # check if text_history is not a list of TextHistory
-        if not all(isinstance(item, tuple) for item in text_history):
-            text_history = [text_history]
+        # if not all(isinstance(item, tuple) for item in text_history):
+        #     text_history = [text_history]
         
         # embed()
         raw_input_strs = [

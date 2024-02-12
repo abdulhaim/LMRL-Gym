@@ -246,7 +246,6 @@ class BatchedCarDealerPolicyEnvironment(BatchedTextEnv):
         if seed_batch is None:
             seed_batch = [None for _ in range(self.bsize)]
 
-        print(self)
         self.outputs = [None for _ in range(len(seed_batch))]
 
         initial_text_history_batch: List[TextHistory] = []

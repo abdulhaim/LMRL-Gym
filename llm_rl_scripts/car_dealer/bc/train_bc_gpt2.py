@@ -87,7 +87,7 @@ def main(
     save_bf16: bool=True, 
 
     eval_loss_bsize: int=4, 
-    eval_loss_batches: Optional[int]=None, 
+    eval_loss_batches: Optional[int]=4, 
 
     policy_n_rollouts: int=32, 
     policy_bsize: int=1, 

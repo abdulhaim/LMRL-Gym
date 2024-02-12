@@ -1,11 +1,13 @@
 from typing import Optional
 import tyro
 from JaxSeq.bucket_manager import open_with_bucket as open
-from transformers import AutoTokenizer
+from JaxSeq.models.gpt2.interface import GPT2Inference
+from JaxSeq.shard_model import shard_params_from_params
 from JaxSeq.utils import jsonl_stream, convert_path, load_mesh, setup_experiment_save
+from JaxSeq.utils import BlockingStrategy, Padding, Truncation, get_weight_decay_mask, MapIterable, jsonl_stream, FileOpenIterable
+from transformers import AutoTokenizer
 import jax
 import jax.numpy as jnp
-from JaxSeq.utils import BlockingStrategy, Padding, Truncation, get_weight_decay_mask, MapIterable, jsonl_stream, FileOpenIterable
 import os
 import optax
 from JaxSeq.models.gpt2.load import load_train_state, ModelLoadMode, load_params
@@ -19,16 +21,15 @@ from LLM_RL.algorithms.ilql.gpt2.interface import GPT2ILQLInference, GPT2ILQLTra
 from LLM_RL.algorithms.value_rl_base.gpt2.interface import GPT2ValuePolicy, GPT2ValueRLInference
 from LLM_RL.heads.mlp_head import load_train_state_from_config as load_head_train_state_from_config
 from LLM_RL.heads.mlp_head import MLPHeadConfig
-from JaxSeq.shard_model import shard_params_from_params
 from LLM_RL.algorithms.ilql.data import ILQLIterableDataset, ILQLDataset
 from functools import partial
 from JaxSeq.logs import log, pull_logs
 from LLM_RL.algorithms.ilql.train import train_loop, eval_loss
 from LLM_RL.algorithms.ilql.data import ILQLData, ILQLIterableDataset
 from JaxSeq.utils import multihost_device_get
+from llm_rl_scripts.car_dealer.env.buyer import BatchedGPT2BuyerPolicy
 from llm_rl_scripts.car_dealer.env.env import BatchedCarDealerPolicyEnvironment 
 from llm_rl_scripts.car_dealer.env.data import create_trajectories_from_conversations, Role
-
 from jax.sharding import PartitionSpec as PS
 from IPython import embed
 import nltk
@@ -162,7 +163,7 @@ def main(
         ), 
     )
 
-    def policy_optim_getter(params: PyTree):
+    def policy_optim_getter(params: PyTree): # type: ignore
         mask = get_weight_decay_mask((
             "".join([r"\['ln_[0-9]+'\]", re.escape("['bias']")]), 
             "".join([r"\['ln_[0-9]+'\]", re.escape("['scale']")]), 
@@ -182,7 +183,7 @@ def main(
             every_k_schedule=grad_accum_steps, 
         )
     
-    def value_head_optim_getter(params: PyTree):
+    def value_head_optim_getter(params: PyTree): # type: ignore
         mask = get_weight_decay_mask(("bias",))(params)
         return optax.MultiSteps(
             optax.adamw(
@@ -385,9 +386,36 @@ def main(
         params_dtype=jnp.float32, 
     )
 
+    buyer_inference = GPT2Inference.load_inference(
+        params=buyer_params,
+        model=buyer_model,
+        tokenizer=tokenizer,
+    )
+
+    buyer_policy = BatchedGPT2BuyerPolicy(
+        inference=buyer_inference, 
+        prng_key=buyer_policy_prng, 
+        generation_config=GenerationConfig(
+            do_sample=policy_do_sample, 
+            num_beams=policy_num_beams, 
+            temperature=policy_temperature, 
+            top_p=policy_top_p, 
+            top_k=policy_top_k, 
+            eos_token_id=tokenizer.encode('\n')[0], 
+            pad_token_id=tokenizer.pad_token_id, 
+            max_new_tokens=policy_max_output_length, 
+        ), 
+        blocking_strategy=BlockingStrategy(
+            padding=Padding.LEFT, 
+            truncation=Truncation.LEFT, 
+            max_length=policy_max_input_length, 
+        ), 
+        out_str_process=lambda x: x.removesuffix('\n')+'\n', 
+    )
+
     env = BatchedCarDealerPolicyEnvironment(
-        buyer=buyer_model,
-        buyer_bsize=1, 
+        buyer=buyer_policy,
+        buyer_bsize=policy_bsize, 
     )
 
 
