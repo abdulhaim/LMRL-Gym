@@ -1,5 +1,6 @@
 from typing import Optional
 import tyro
+import nltk
 from JaxSeq.bucket_manager import open_with_bucket as open
 from transformers import AutoTokenizer
 from JaxSeq.utils import jsonl_stream, convert_path, load_mesh, setup_experiment_save
@@ -267,7 +268,6 @@ def main(
     
     model_prng_key = jax.random.PRNGKey(2)
     policy_prng, oracle_prng = jax.random.split(model_prng_key)
-    # oracle_model_path = "gs://rail-tpus-charles-3/JaxSeq/outputs/twenty_questions/flan-t5-xl_convos_0_1000_noprompt_lr1e-3_test1"
 
     env = TwentyQuestionsPolicyEnvironment(
         oracle=T5Oracle.load_oracle(

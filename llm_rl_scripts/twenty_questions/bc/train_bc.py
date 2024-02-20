@@ -256,7 +256,6 @@ def main(
         script__file__=__file__, 
         is_main_process=is_main_process, 
     )
-    save_dir = "/nfs/nfs1/users/marwa/models"
     policy_prng = jax.random.PRNGKey(0)
     def evaluator(inference: GPT2InferenceMask):
         nonlocal policy_prng

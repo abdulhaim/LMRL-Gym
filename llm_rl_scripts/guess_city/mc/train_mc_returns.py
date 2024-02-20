@@ -1,5 +1,7 @@
 from typing import Optional
 import tyro
+import nltk
+import json
 from JaxSeq.bucket_manager import open_with_bucket as open
 from transformers import AutoTokenizer
 from JaxSeq.utils import jsonl_stream, convert_path, load_mesh, setup_experiment_save
@@ -25,17 +27,17 @@ from LLM_RL.algorithms.mc_returns.train import train_loop, eval_loss
 from LLM_RL.algorithms.mc_returns.data import MCData, MCIterableDataset
 from LLM_RL.algorithms.mc_returns.gpt2.interface import GPT2MCTrain, GPT2MCInference
 
-from llm_rl_scripts.guess_city.env import GuessCityPolicyEnvironment
+from llm_rl_scripts.guess_city.env.env import GuessCityPolicyEnvironment
 from llm_rl_scripts.guess_city.env.oracle import T5Oracle
 from llm_rl_scripts.guess_city.env.oracle import T5ModelLoadMode as T5OracleModelLoadMode
-from llm_rl_scripts.guess_city.env.data import get_default_word_list, create_conversation_from_history 
+from llm_rl_scripts.guess_city.env.data import create_trajectories_from_conversations, asker_postproc, asker_postproc_simple, asker_postproc_filter_repeats, get_default_word_list
 
 def main(
     model_load_mode: ModelLoadMode, 
     model_load_path: str, 
     train_data_path: str, 
     eval_data_path: str, 
-    vocab_file: str, 
+    oracle_model_path: str,
 
     /,  # Mark the end of positional arguments.
 
@@ -104,26 +106,38 @@ def main(
 
     ): 
 
-    input_args = locals()
+    nltk.download('punkt')
+    nltk.download('averaged_perceptron_tagger')
+    input_args = dict(locals())
     print(input_args)
 
-    tokenizer = AutoTokenizer.from_pretrained('EleutherAI/gpt-j-6B')
+    tokenizer = AutoTokenizer.from_pretrained('gpt2')
     tokenizer.add_special_tokens({'pad_token': '<|pad|>'})
 
-    def map_data_item(item):
-        text_trajectory_chain = TextTrajectoryChain(
-            text_trajectory=TextTrajectory(
-                text_history=[Text(text, bool(is_action)) for text, is_action in item['sequence']], 
-                reward=[0.0]+item['reward'], 
-                done=item['done'], 
-            ), 
-            next=None, 
-        )
-        token_trajectory_chain = TokenTrajectoryChain.from_text_trajectory_chain(text_trajectory_chain, tokenizer)
-        return MCData.from_token_trajectory_chain(token_trajectory_chain, gamma=gamma)
+    mesh = load_mesh((data_mesh_shape, fsdp_mesh_shape, model_mesh_shape), ('dp', 'fsdp', 'mp'))
+    is_main_process = jax.process_index() == 0
+    print(f"Mesh: {mesh}")
+    print(f"Is main process: {is_main_process}")
+
+    # load data
+    with open(convert_path(train_data_path), 'r') as f:
+        raw_train = json.load(f)
+    with open(convert_path(eval_data_path), 'r') as f:
+        raw_eval = json.load(f)
+
+    train_text_trajectories = create_trajectories_from_conversations(raw_train)
+    eval_text_trajectories = create_trajectories_from_conversations(raw_eval)
+
+
+    def mc_data_generator(trajectories):
+        for trajectory in trajectories:
+            trajectory_chain = TextTrajectoryChain(text_trajectory=trajectory, 
+                                                   next=None,)
+            token_trajectory = TokenTrajectoryChain.from_text_trajectory_chain(trajectory_chain, tokenizer)
+            yield MCData.from_token_trajectory_chain(token_trajectory, gamma=gamma)
 
     train_dataset = MCIterableDataset.from_mc_data_iterable(
-        MapIterable(map_data_item, FileOpenIterable(convert_path(train_data_path), 'r', pipe=jsonl_stream)), 
+        mc_data_generator(train_text_trajectories),
         tokenizer, 
         BlockingStrategy(
             padding=Padding.RIGHT, 
@@ -133,7 +147,7 @@ def main(
     )
 
     eval_dataset = MCIterableDataset.from_mc_data_iterable(
-        MapIterable(map_data_item, FileOpenIterable(convert_path(eval_data_path), 'r', pipe=jsonl_stream)), 
+        mc_data_generator(eval_text_trajectories),
         tokenizer, 
         BlockingStrategy(
             padding=Padding.RIGHT, 
@@ -245,11 +259,13 @@ def main(
         dp_shard_logits=True, 
     ) 
 
+    oracle_prng = jax.random.PRNGKey(7)
+
     env = GuessCityPolicyEnvironment(
         oracle=T5Oracle.load_oracle(
             mesh=mesh,
             prng_key=oracle_prng,
-            model_load_mode=oracle_model_mode,
+            model_load_mode=T5OracleModelLoadMode.PARAMS,
             model_load_path=oracle_model_path,
             use_fp16_activations=False,
             use_fp16_params=False,

@@ -236,6 +236,7 @@ def create_conversations_from_histories(
     max_conversation_len: How many lines of conversation? Default=20, because the task is called twenty questions.
     """
     assert len(word_vars) == len(text_histories)
+    print(word_vars)
     return [
         create_conversation_from_history(word_var, text_history, max_conversation_len=max_conversation_len) 
         for word_var, text_history in zip(word_vars, text_histories)

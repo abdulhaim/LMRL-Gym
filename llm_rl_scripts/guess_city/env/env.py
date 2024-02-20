@@ -37,7 +37,6 @@ class GuessCityPolicyEnvironment(TextEnv):
     def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None) -> TextHistory:
         if seed is not None:
             self.random = random.Random(seed)
-
         deterministic = options.get("deterministic", False)
         if deterministic:
             assert seed is not None, "In deterministic mode, the seed specifies which word to use."

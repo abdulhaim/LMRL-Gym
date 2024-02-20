@@ -48,7 +48,7 @@ INITIAL_STR = "Questions:\n"
 def get_default_word_list() -> List[WordVariants]:
     city_names = {}
     word_list = []
-    with open('global_cities.txt') as f:
+    with open('llm_rl_scripts/guess_city/env/global_cities.txt') as f:
         lines = f.readlines()
         for i in range(2, len(lines)):
             line = lines[i]
@@ -336,17 +336,18 @@ def is_done(word_var: WordVariants, question: str):
     question_pos = nltk.pos_tag(nltk.word_tokenize(question.lower()))
     
     # check for the actual word at the end of the question
-    for word_pos in word_var.pos_tags:
-        if len(word_pos) > len(question_pos):
-            continue
+    word_pos = word_var
+    # for word_pos in word_var.pos_tags:
+    #     if len(word_pos) > len(question_pos):
+    #         continue
         
-        all_same = True
-        for (var_i_word, _), (q_i_word, _) in zip(word_pos, question_pos[-len(word_pos):]):
-            if var_i_word != q_i_word:
-                all_same = False
-                break
-        if all_same:
-            return True
+    all_same = True
+    for (var_i_word), (q_i_word, _) in zip(word_pos, question_pos[-len(word_pos):]):
+        if var_i_word != q_i_word:
+            all_same = False
+            break
+    if all_same:
+        return True
     
     return False
 

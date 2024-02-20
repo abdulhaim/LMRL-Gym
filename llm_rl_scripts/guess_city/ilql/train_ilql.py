@@ -27,19 +27,21 @@ from LLM_RL.algorithms.ilql.train import train_loop, eval_loss
 from LLM_RL.algorithms.ilql.data import ILQLData, ILQLIterableDataset
 from JaxSeq.utils import multihost_device_get
 
-from llm_rl_scripts.guess_city.env import GuessCityPolicyEnvironment
+from llm_rl_scripts.guess_city.env.env import GuessCityPolicyEnvironment
 from llm_rl_scripts.guess_city.env.oracle import T5Oracle
 from llm_rl_scripts.guess_city.env.oracle import T5ModelLoadMode as T5OracleModelLoadMode
-from llm_rl_scripts.guess_city.env.data import get_default_word_list, create_conversation_from_history 
+from llm_rl_scripts.guess_city.env.data import create_trajectories_from_conversations, get_default_word_list, create_conversation_from_history
 
 from jax.sharding import PartitionSpec as PS
+import nltk
+import json
 
 def main(
     model_load_mode: ModelLoadMode, 
     model_load_path: str, 
     train_data_path: str, 
     eval_data_path: str, 
-    vocab_file: str, 
+    oracle_model_path: str,
 
     /,  # Mark the end of positional arguments.
 
@@ -113,7 +115,9 @@ def main(
     tau: float=0.7, 
     cql_weight: float=0.01, 
 ):
-    input_args = locals()
+    nltk.download('punkt')
+    nltk.download('averaged_perceptron_tagger')
+    input_args = dict(locals())
     print(input_args)
 
     tokenizer = AutoTokenizer.from_pretrained('gpt2')
@@ -124,20 +128,25 @@ def main(
     print(f"Mesh: {mesh}")
     print(f"Is main process: {is_main_process}")
 
-    def map_data_item(item):
-        text_trajectory_chain = TextTrajectoryChain(
-            text_trajectory=TextTrajectory(
-                text_history=[Text(text, bool(is_action)) for text, is_action in item['sequence']], 
-                reward=[0.0]+item['reward'], 
-                done=item['done'], 
-            ), 
-            next=None, 
-        )
-        token_trajectory_chain = TokenTrajectoryChain.from_text_trajectory_chain(text_trajectory_chain, tokenizer)
-        return ILQLData.from_token_trajectory_chain(token_trajectory_chain)
+
+     # load data
+    with open(convert_path(train_data_path), 'r') as f:
+        raw_train = json.load(f)
+    with open(convert_path(eval_data_path), 'r') as f:
+        raw_eval = json.load(f)
+
+    train_text_trajectories = create_trajectories_from_conversations(raw_train)
+    eval_text_trajectories = create_trajectories_from_conversations(raw_eval)
+
+    def ilql_data_generator(trajectories):
+        for trajectory in trajectories:
+            trajectory_chain = TextTrajectoryChain(text_trajectory=trajectory, 
+                                                   next=None,)
+            token_trajectory = TokenTrajectoryChain.from_text_trajectory_chain(trajectory_chain, tokenizer)
+            yield ILQLData.from_token_trajectory_chain(token_trajectory)
 
     train_dataset = ILQLIterableDataset.from_ilql_data_iterable(
-        MapIterable(map_data_item, FileOpenIterable(convert_path(train_data_path), 'r', pipe=jsonl_stream)), 
+        ilql_data_generator(train_text_trajectories), 
         tokenizer, 
         BlockingStrategy(
             padding=Padding.RIGHT, 
@@ -147,7 +156,7 @@ def main(
     )
 
     eval_dataset = ILQLIterableDataset.from_ilql_data_iterable(
-        MapIterable(map_data_item, FileOpenIterable(convert_path(eval_data_path), 'r', pipe=jsonl_stream)), 
+        ilql_data_generator(eval_text_trajectories), 
         tokenizer, 
         BlockingStrategy(
             padding=Padding.RIGHT, 
@@ -155,6 +164,7 @@ def main(
             max_length=max_length, 
         ), 
     )
+
 
     def policy_optim_getter(params: PyTree):
         mask = get_weight_decay_mask((
@@ -366,11 +376,13 @@ def main(
         loss_fn=loss_fn, 
     )
     
+    oracle_prng = jax.random.PRNGKey(7)
+
     env = GuessCityPolicyEnvironment(
         oracle=T5Oracle.load_oracle(
             mesh=mesh,
             prng_key=oracle_prng,
-            model_load_mode=oracle_model_mode,
+            model_load_mode=T5OracleModelLoadMode.PARAMS,
             model_load_path=oracle_model_path,
             use_fp16_activations=False,
             use_fp16_params=False,
@@ -391,70 +403,54 @@ def main(
 
     policy_prng = jax.random.PRNGKey(0)
 
-    def evaluate(inference: Inference):
-        nonlocal evaluator_rng, num_eval_calls
-
-        num_eval_calls += 1
-        evaluator_rng, eval_loop_rng, eval_agent_rng = jax.random.split(evaluator_rng, 3)
-
-        results = {}
-
-        data_results = eval_loop(
-            inference=inference, 
-            dataset=eval_data, 
-            rng=eval_loop_rng, 
-            bsize=inference_bsize, 
-            prefetch_batches=None, 
-            eval_batches=eval_batches, 
+    def evaluate(inference: GPT2ILQLInference):
+        nonlocal policy_prng
+        policy_prng, new_key = jax.random.split(policy_prng)
+        policy = GPT2ValuePolicy(
+            inference=inference.value_inference, 
+            prng_key=new_key, 
+            generation_config=GenerationConfig(
+                do_sample=policy_do_sample, 
+                num_beams=policy_num_beams, 
+                temperature=policy_temperature, 
+                top_p=policy_top_p, 
+                top_k=policy_top_k, 
+                eos_token_id=tokenizer.encode('\n')[0], 
+                pad_token_id=tokenizer.pad_token_id, 
+                max_new_tokens=policy_max_output_length, 
+            ), 
+            blocking_strategy=BlockingStrategy(
+                padding=Padding.LEFT, 
+                truncation=Truncation.LEFT, 
+                max_length=policy_max_input_length, 
+            ), 
+            out_str_process=lambda x: x.removesuffix('\n')+'\n', 
         )
-        results['data'] = data_results
-        
-        results['env'] = {}
-        for beta, min_eval_calls in zip([1.0, 4.0, 8.0, 16.0], [min_eval_calls_before_eval] * 4):
-            if num_eval_calls < min_eval_calls:
-                continue
 
-            env.curr_word = None
-            eval_max_new_tokens = 64
-            eval_max_sequence_length = 425
-            env_results, interactions = text_env_eval(
-                env=env, 
-                policy=JaxAgentPolicy(
-                    inference=inference, 
-                    tokenizer=tokenizer, 
-                    rng=eval_agent_rng, 
-                    max_input_length=eval_max_sequence_length-eval_max_new_tokens, 
-                    condition_str=None, 
-                    postproc_f=asker_postproc_filter_repeats, 
-                    data_parallel_mesh_shape=data_p_shape, 
-                    do_sample=False, 
-                    num_beams=1, 
-                    pad_token_id=tokenizer.pad_token_id, 
-                    eos_token_id=tokenizer.encode('\n')[0], 
-                    max_new_tokens=eval_max_new_tokens, 
-                    beta=beta,
-                ), 
-                n_rounds=eval_num_samples, 
-                verbose=eval_verbose, 
-                print_delim="",
-                save_path=None,
-                seed=0, 
-                env_options={"deterministic": eval_env_deterministic},
-                return_interactions=True,
-            )
-            returns = [sum([r for _, _, _, r, _ in transitions]) for transitions in interactions]
-            corrects = [ret > -19.5 for ret in returns] # correct if not -20 return
-            percent_corrects = sum(corrects) / len(corrects)
-            env_results['percent_corrects'] = percent_corrects
+        loss_results = eval_loss(
+            inference=inference, 
+            dataset=eval_dataset, 
+            prng_key=None, 
+            bsize=eval_loss_bsize, 
+            eval_batches=eval_loss_batches, 
+        )
 
-            results['env'][f'beta{int(beta)}'] = env_results
-        
-        if len(results['env']) == 0:
-            return float('inf'), results
+        interaction_raw_results, interaction_summary_results = text_env_eval(
+            env=env, 
+            policy=policy, 
+            n_rollouts=policy_n_rollouts, 
+            bsize=policy_bsize, 
+        )
 
-        max_avg_reward = max(results['env'][beta_name]['avg_reward'] for beta_name in results['env'])
+        for item in interaction_raw_results:
+            print('='*25)
+            print(text_history_to_str(item[-1].post_transition_history))
+            print('='*25)
 
-        return -max_avg_reward, results
+        logs = pull_logs(interaction_summary_results)
+        log(logs, use_wandb and is_main_process)
+
+        return loss_results['losses']['total_loss'], {'interaction': logs, 'loss': loss_results}
 
     
     train_prng = jax.random.PRNGKey(1)

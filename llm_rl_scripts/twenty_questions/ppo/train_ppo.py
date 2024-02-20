@@ -30,8 +30,6 @@ import json
 import random
 from JaxSeq.utils import multihost_device_get
 from JaxSeq.data import MaskIterableDataset
-from llm_rl_scripts.wordle.env.env import ReformatWordleEnvironment, WordleEnvironment
-from llm_rl_scripts.wordle.env.game import Vocabulary
 from dataclasses import replace
 from JaxSeq.models.gpt2.interface import loss_fn_mask
 
@@ -44,11 +42,9 @@ def main(
     model_load_mode: ModelLoadMode, 
     model_load_path: str, 
     bc_data_path: str, 
-    oracle_model_mode: T5OracleModelLoadMode,
     oracle_model_path: str,
 
     /,  # Mark the end of positional arguments.
-
     exp_name: Optional[str]=None, 
     outputs_path: Optional[str]=None, 
 
