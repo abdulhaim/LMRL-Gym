@@ -27,6 +27,7 @@ from llm_rl_scripts.car_dealer.env.data import Role, create_trajectories_from_co
 from IPython import embed
 import nltk
 
+
 def main(
     model_load_mode: ModelLoadMode, 
     model_load_path: str, 
@@ -69,11 +70,11 @@ def main(
 
     bf16_activations: bool=False, 
 
-    max_length: int=512, 
+    max_length: int=1024, 
 
     log_every: int=256, 
-    eval_every_steps: Optional[int]=256, 
-    eval_every_epochs: Optional[int]=None, 
+    eval_every_steps: Optional[int]=None, 
+    eval_every_epochs: Optional[int]=1, 
     eval_at_beginning: bool=False, 
     eval_at_end: bool=True, 
     
@@ -87,7 +88,7 @@ def main(
     save_bf16: bool=True, 
 
     eval_loss_bsize: int=4, 
-    eval_loss_batches: Optional[int]=4, 
+    eval_loss_batches: int=4, 
 
     policy_n_rollouts: int=32, 
     policy_bsize: int=1, 
@@ -129,13 +130,6 @@ def main(
     train_text_trajectories = create_trajectories_from_conversations(raw_train, role=Role.SELLER)
     eval_text_trajectories = create_trajectories_from_conversations(raw_eval, role=Role.SELLER)
 
-    # train_text_trajectories = []
-    # eval_text_trajectories = []
-    # for convos in raw_train:
-    #     train_text_trajectories.extend(create_trajectories_from_conversations(convos, role=Role.SELLER))
-    # for convos in raw_eval:
-    #     eval_text_trajectories.extend(create_trajectories_from_conversations(convos, role=Role.SELLER))
-
     def convert_trajectory_to_masked_text(trajectories):
         for trajectory in trajectories:
             text_history = trajectory.text_history
@@ -144,6 +138,14 @@ def main(
                 item = (text.text, text.is_action)
                 lst.append(item)
             yield lst
+    # generator = convert_trajectory_to_masked_text(train_text_trajectories)
+    # text_history = next(generator)
+    # print(text_history)
+    # for text in text_history:
+    #     encoded = tokenizer.encode(text[0])
+    #     total_tokens += len(encoded)
+    # print(total_tokens)
+    # embed()
     
     # train_text_histories = [convert_trajectory_to_masked_text(text_trajectory) for text_trajectory in train_text_trajectories]
     # eval_text_histories = [convert_trajectory_to_masked_text(text_trajectory) for text_trajectory in eval_text_trajectories]

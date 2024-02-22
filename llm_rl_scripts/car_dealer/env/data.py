@@ -12,6 +12,7 @@ import time
 import numpy as np
 import nltk
 import math
+from IPython import embed
 
 
 class Role(Enum):
@@ -30,12 +31,12 @@ class Role(Enum):
         if self == self.BUYER:
             return "Buyer"
         elif self == self.SELLER:
-            return "Seller"
+            return "Dealer" 
         else:
             raise NotImplementedError
 
 
-INITIAL_STR = "Start\n"
+INITIAL_STR = "Beginning of Conversation\n"
 DEFAULT_BUDGETS = [10000, 30000, 50000, 70000, 90000]
 DEFAULT_PERSONALITIES = ['abusive', 'angry', 'insulting', 'polite', 'respectful', 'rude', 'sarcastic', 'talkative', 'toxic', 'uncommunicative']
 DEFAULT_BRANDS = ['a Volkswagen', 'a Lexus', 'a Ford', 'a Mazda', 'a Hyundai', 'a Toyota', 'a Mercedes-Benz', 'a BMW', 'an Audi', 'a Subaru', 'a Honda', 'a Porsche', 'a Tesla']
@@ -248,6 +249,7 @@ def create_trajectory_from_conversation(conversation: Conversation, role: Role, 
             text_history.append(Text(f"Output: Decision=Reject MSRP=${msrp:,}\n", is_action=True))
 
     text_history = list(join_consecutive_actions(text_history))
+    # embed()
     text_history = [replace(text, text=text.text if text.text.endswith("\n") else text.text + "\n") for text in text_history]
 
     reward = [0.0 for _ in range(len(text_history))]

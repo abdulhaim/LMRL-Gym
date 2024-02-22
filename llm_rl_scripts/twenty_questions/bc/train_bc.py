@@ -72,7 +72,7 @@ def main(
     max_length: int=1024, 
 
     log_every: int=256, 
-    eval_every_steps: Optional[int]=256, 
+    eval_every_steps: Optional[int]=4096, 
     eval_every_epochs: Optional[int]=None, 
     eval_at_beginning: bool=False, 
     eval_at_end: bool=True, 
@@ -87,7 +87,7 @@ def main(
     save_bf16: bool=True, 
 
     eval_loss_bsize: int=32, 
-    eval_loss_batches: Optional[int]=None, 
+    eval_loss_batches: int=4, 
 
     policy_n_rollouts: int=32, 
     policy_bsize: int=1, 
@@ -103,14 +103,7 @@ def main(
 
     should_restore_loop_state: bool=False, 
 ):
-    def convert_trajectory_to_masked_text(trajectories):
-        for trajectory in trajectories:
-            text_history = trajectory.text_history
-            lst = []
-            for text in text_history:
-                item = (text.text, text.is_action)
-                lst.append(item)
-            yield lst
+    
     
     nltk.download('punkt')
     nltk.download('averaged_perceptron_tagger')
