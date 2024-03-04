@@ -27,6 +27,7 @@ from llm_rl_scripts.guess_city.env.env import GuessCityPolicyEnvironment
 from llm_rl_scripts.guess_city.env.oracle import T5Oracle
 from llm_rl_scripts.guess_city.env.oracle import T5ModelLoadMode as T5OracleModelLoadMode
 from llm_rl_scripts.guess_city.env.data import create_trajectories_from_conversations, asker_postproc, asker_postproc_simple, asker_postproc_filter_repeats, get_default_word_list
+from IPython import embed
 
 def main(
     model_load_mode: ModelLoadMode, 
@@ -87,13 +88,13 @@ def main(
     save_train_state: bool=True, 
     save_bf16: bool=True, 
 
-    eval_loss_bsize: int=32, 
+    eval_loss_bsize: int=8, 
     eval_loss_batches: Optional[int]=None, 
 
     policy_n_rollouts: int=32, 
     policy_bsize: int=1, 
     policy_max_input_length: int=256, 
-    policy_max_output_length: int=256, 
+    policy_max_output_length: int=128, 
     policy_do_sample: bool=True, 
     policy_num_beams: int=1, 
     policy_temperature: Optional[float]=None, 
@@ -154,7 +155,7 @@ def main(
         tokenizer, 
         blocking_strategy=BlockingStrategy(
             padding=Padding.RIGHT, 
-            truncation=Truncation.LEFT, 
+            truncation=Truncation.RIGHT, 
             max_length=max_length, 
         ), 
     )
@@ -164,7 +165,7 @@ def main(
         tokenizer, 
         blocking_strategy=BlockingStrategy(
             padding=Padding.RIGHT, 
-            truncation=Truncation.LEFT, 
+            truncation=Truncation.RIGHT, 
             max_length=max_length, 
         ), 
     )

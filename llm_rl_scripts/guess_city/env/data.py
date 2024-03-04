@@ -5,6 +5,7 @@ import re
 from LLM_RL.environment import Text, TextHistory, TextTrajectory
 import nltk
 import math
+# from IPython import embed
 
 Conversation = Dict[str, Union[str, List[str]]]
 
@@ -129,6 +130,7 @@ def create_trajectory_from_conversation(conversation: Conversation, max_conversa
     reward: List[float] = [0.0]
     done: bool = True
 
+    # embed()
     for line in conversation["lines"]:
         question, answer = split_question_answer(line)
         # The agent is the asker
