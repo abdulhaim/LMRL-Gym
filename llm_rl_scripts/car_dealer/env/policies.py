@@ -30,6 +30,18 @@ class UserPolicy(TextPolicy):
         return text_history+(Text(result, True),)            
 
 
+class ModelPolicy(TextPolicy):
+    def __init__(self):
+        super().__init__()
+
+    def act(self, text_history: TextHistory) -> TextHistory:
+        print(text_history)
+        
+        result = input("Respond to the buyer:").strip() #TODO: need to replace with model checkpoint
+        result+="\n"
+        return text_history+(Text(result, True),)            
+
+
 def eval(env, policy, data_mesh_shape: int=1, fsdp_mesh_shape: int=1, model_mesh_shape: int=-1):
     mesh = load_mesh((data_mesh_shape, fsdp_mesh_shape, model_mesh_shape), ('dp', 'fsdp', 'mp'))
     num_samples = 10
@@ -83,6 +95,7 @@ def eval(env, policy, data_mesh_shape: int=1, fsdp_mesh_shape: int=1, model_mesh
                 save_once()
         
         save_once()
+        
 def car_dealer_env(buyer_model_path, data_mesh_shape: int=1, fsdp_mesh_shape: int=1, model_mesh_shape: int=-1):
     prng_key = jax.random.PRNGKey(3)
     prng_key, buyer_inference_prng, buyer_policy_prng = jax.random.split(prng_key, 3)
