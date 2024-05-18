@@ -13,8 +13,8 @@ from flax.core.frozen_dict import FrozenDict
 import optax
 from jaxtyping import PyTree
 from transformers.modeling_flax_utils import FlaxPreTrainedModel
-from environment import TextHistory, TokenHistory
-from algorithms.jax_agent import Inference, StepOutput, Trainer
+from LLM_RL.environment import TextHistory, TokenHistory
+from LLM_RL.algorithms.bc.core import Inference, StepOutput, Trainer
 from JaxSeq.utils import block_sequences
 from LLM_RL.algorithms.bc.data import block_token_histories
 # from token_history import text_history_to_token_history

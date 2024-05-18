@@ -142,25 +142,32 @@ def main(
 
     is_main_process = jax.process_index() == 0
     mesh = load_mesh((data_mesh_shape, fsdp_mesh_shape, model_mesh_shape), ('dp', 'fsdp', 'mp'))
-    
-    open = partial(open, gcloud_project=gcloud_project, gcloud_token=gcloud_token)
+
+    global open
+    if gcloud_project is not None:
+        print('open files from gcloud project')
+        open = partial(open, gcloud_project=gcloud_project, gcloud_token=gcloud_token)
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     if tokenizer.pad_token is None:
         print("set pad_token")
         tokenizer.add_special_tokens({'pad_token': '<|pad|>'})
 
+    print('filepath:', convert_path(os.path.join(data_path, 'train.json')))
     with open(convert_path(os.path.join(data_path, 'train.json')), 'r') as f:
         raw_train = json.load(f)
     with open(convert_path(os.path.join(data_path, 'eval.json')), 'r') as f:
         raw_eval = json.load(f)
 
-    train_text_trajectories = []
-    eval_text_trajectories = []
-    for personality, convos in raw_train.items():
-        train_text_trajectories.extend(create_trajectories_from_conversations(convos, role))
-    for personality, convos in raw_eval.items():
-        eval_text_trajectories.extend(create_trajectories_from_conversations(convos, role))
+    # train_text_trajectories = []
+    # eval_text_trajectories = []
+    # for personality, convos in raw_train.items():
+    #     train_text_trajectories.extend(create_trajectories_from_conversations(convos, role))
+    # for personality, convos in raw_eval.items():
+    #     eval_text_trajectories.extend(create_trajectories_from_conversations(convos, role))
+
+    train_text_trajectories = create_trajectories_from_conversations(raw_train, role=role)
+    eval_text_trajectories = create_trajectories_from_conversations(raw_eval, role=role)
 
     print(f"Initial dataset sizes: train: {len(train_text_trajectories)}, eval: {len(eval_text_trajectories)}")
 
@@ -195,21 +202,21 @@ def main(
         tail_checkpoint, head_checkpoint = os.path.split(checkpoint_path.strip('/'))
         checkpoint_path = os.path.join(tail_checkpoint, 'shard_%d' % (jax.process_index()), head_checkpoint)
     
-    if model_name == 'gpt2-xl' or model_name == 'gpt2-medium':
-        print("loading model")
-        train_state, model = load_train_state(
-            model_load_mode=model_load_mode, 
-            model_load_path=convert_path(model_name) if model_load_mode != ModelLoadMode.HF else model_name, 
-            model_dtype=jnp.bfloat16 if bf16_activations else jnp.float32, 
-            optim_getter=optim_getter, 
-            tokenizer=tokenizer, 
-            mesh=mesh, 
-            prng_key=model_prng_key, 
-            force_pad_embeddings=force_pad_embeddings, 
-            params_dtype=jnp.float32, 
-        )
-    else:
-        raise NotImplementedError
+    # if model_name == 'gpt2-xl' or model_name == 'gpt2-medium':
+    #     print("loading model")
+    #     train_state, model = load_train_state(
+    #         model_load_mode=model_load_mode, 
+    #         model_load_path=convert_path(model_name) if model_load_mode != ModelLoadMode.HF else model_name, 
+    #         model_dtype=jnp.bfloat16 if bf16_activations else jnp.float32, 
+    #         optim_getter=optim_getter, 
+    #         tokenizer=tokenizer, 
+    #         mesh=mesh, 
+    #         prng_key=model_prng_key, 
+    #         force_pad_embeddings=force_pad_embeddings, 
+    #         params_dtype=jnp.float32, 
+    #     )
+    # else:
+    #     raise NotImplementedError
 
     def optim_getter(params: PyTree):
             mask = get_weight_decay_mask((
