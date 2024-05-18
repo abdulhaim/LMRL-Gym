@@ -308,7 +308,7 @@ def main(
 
     env = BatchedCarDealerPolicyEnvironment(
         buyer=buyer_model, 
-        bsize=8,
+        buyer_bsize=8,
     )
 
     def evaluator(inference: GPT2InferenceMask):
