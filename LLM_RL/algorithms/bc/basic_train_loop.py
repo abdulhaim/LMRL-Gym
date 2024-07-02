@@ -10,7 +10,7 @@ from collections import deque
 import jax
 from tqdm.auto import tqdm
 from JaxSeq.utils import Dataset, IterableDataset, block_sequences, BlockingStrategy, dataloader
-from log_utils import combine_logs, label_logs, log, pull_logs
+from JaxSeq.logs import combine_logs, label_logs, log, pull_logs
 import os
 from transformers.modeling_flax_utils import FlaxPreTrainedModel
 import wandb

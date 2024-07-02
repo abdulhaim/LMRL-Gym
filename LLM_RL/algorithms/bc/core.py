@@ -45,6 +45,18 @@ def bc_loss(
 
 StepOutput = namedtuple('StepOutput', ['loss', 'info', 'params', 'optim_state'])
 
+
+class Trainer(struct.PyTreeNode):
+    params: PyTree
+    optim_state: PyTree
+    tokenizer: PreTrainedTokenizer = struct.field(pytree_node=False)
+    train_fn: Callable[[PyTree, PyTree, KeyArray, PyTree], StepOutput] = struct.field(pytree_node=False)
+
+    def train_step(self, batch: PyTree, rng_key: KeyArray) -> Tuple[jnp.ndarray, Dict[str, Any], Trainer]:
+        loss, info, new_params, new_optim_state = self.train_fn(self.params, self.optim_state, rng_key, batch)
+        return loss, info, self.replace(params=new_params, optim_state=new_optim_state)
+
+
 class BCTrainer(Trainer):    
     def train_step_from_text_history(self, text_histories: List[TextHistory], max_len: Optional[int], rng_key: KeyArray) -> Tuple[jnp.ndarray, Dict[str, Any], BCTrainer]:
 
@@ -90,18 +102,6 @@ class Inference(struct.PyTreeNode):
         output_strs = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)
         
         return output_strs
-
-class Trainer(struct.PyTreeNode):
-    params: PyTree
-    optim_state: PyTree
-    tokenizer: PreTrainedTokenizer = struct.field(pytree_node=False)
-    train_fn: Callable[[PyTree, PyTree, KeyArray, PyTree], StepOutput] = struct.field(pytree_node=False)
-    
-    def train_step(self, batch: PyTree, rng_key: KeyArray) -> Tuple[jnp.ndarray, Dict[str, Any], Trainer]:
-        
-        loss, info, new_params, new_optim_state = self.train_fn(self.params, self.optim_state, rng_key, batch)
-
-        return loss, info, self.replace(params=new_params, optim_state=new_optim_state)
 
 class BCInference(Inference):
     logit_fn: Callable[[PyTree, jnp.ndarray], jnp.ndarray] = struct.field(pytree_node=False)

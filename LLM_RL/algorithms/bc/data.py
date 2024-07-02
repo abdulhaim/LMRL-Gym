@@ -1,23 +1,29 @@
 from typing import Any, Callable, Generator, Iterator, List, Optional, Tuple, Union
 from LLM_RL.environment import TokenHistory
 import numpy as np
-from  import Dataset, IterableDataset, block_sequences
+from JaxSeq.utils import Dataset, IterableDataset, block_sequences
+from JaxSeq.utils import BlockingStrategy, Padding, Truncation
 import jax.numpy as jnp
 
 # pad token histories
 
 def block_token_histories(token_histories: List[TokenHistory], max_len: Optional[int], pad_token_id: int) -> Tuple[np.ndarray, np.ndarray]:
+    blocking_strategy = BlockingStrategy(
+        padding=Padding.RIGHT,
+        truncation=Truncation.RIGHT,
+        max_length=max_len,
+    )
     tokens = block_sequences(
         [token_history.tokens for token_history in token_histories], 
-        max_len=max_len, 
         pad_value=pad_token_id, 
         dtype=np.int32, 
+        blocking_strategy=blocking_strategy,
     )
     is_action = block_sequences(
         [token_history.is_action for token_history in token_histories], 
-        max_len=max_len, 
         pad_value=False, 
         dtype=np.bool_, 
+        blocking_strategy=blocking_strategy,
     )
     return tokens, is_action
 
